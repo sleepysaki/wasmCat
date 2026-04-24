@@ -1,0 +1,35 @@
+name: Sync to Azure DevOps
+
+on:
+  push:
+    branches:
+      - main  # Or '*' to sync all branches
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          # Fetch all history and branches for a complete sync
+          fetch-depth: 0
+
+      - name: Sync to Azure DevOps
+        env:
+          AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_TOKEN }}
+          # Update the URL with your Org and Project names
+          AZURE_DEVOPS_URL: "https://dev.azure.com/<ORG_NAME>/<PROJECT_NAME>/_git/<REPO_NAME>"
+        run: |
+          # Configure Git identity (optional but recommended)
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          # Add Azure DevOps as a remote
+          # The PAT is embedded in the URL for authentication
+          git remote add azure https://x-token-auth:$AZURE_DEVOPS_PAT@${AZURE_DEVOPS_URL#https://}
+
+          # Push to the remote. --force or --mirror can be used depending on your needs.
+          # Using --all pushes all branches; --tags pushes all tags.
+          git push azure --all --force
+          git push azure --tags --force
