@@ -1,20 +1,29 @@
+package worker
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/tetratelabs/wazero/api"
+)
+
 // Allocate memory in the Wasm module by calling malloc function
 func Allocate(ctx context.Context, mod api.Module, size uint32) (uint32, error) {
 	// Find the Wasm "malloc" function
 	malloc := mod.ExportedFunction("malloc")
-	
+
 	results, err := malloc.Call(ctx, uint64(size))
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return uint32(results[0]), nil
 }
 
 // Write stuff into the Wasm module's memory by first allocating space and then writing bytes
 func WriteString(ctx context.Context, mod api.Module, input string) (uint32, error) {
 	size := uint32(len(input))
-	
+
 	// 1. Get a pointer from Wasm
 	ptr, err := Allocate(ctx, mod, size)
 	if err != nil {
