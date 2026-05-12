@@ -60,3 +60,15 @@ func (r *Registry) GetActiveWorkers() []shared.WorkerNode
 	}
 	return activeWorkers
 }
+
+// Clean up workers that haven't sent a heartbeat in the last 30 seconds
+func (r *Registry) Cleanup() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, node := range r.workers {
+		if time.Since(node.LastSeen) > 30*time.Second {
+			delete(r.workers, id)
+		}
+	}
+}
