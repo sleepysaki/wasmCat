@@ -69,3 +69,17 @@ func (g *Gateway) Start(port string) error {
 	// Start the server
 	return http.ListenAndServe(":"+port, nil)
 }
+
+func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
+	var req shared.ExecutionRequest
+	json.NewDecoder(r.Body).Decode(&req)
+
+	// Tell the Dispatcher to find a worker and run the code
+	result, err := g.Dispatcher.Dispatch(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
