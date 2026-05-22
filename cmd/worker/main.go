@@ -11,7 +11,7 @@ func main() {
 	// := is a shorthand for declaring and initializing a variable in one line -> create new variable called ctx and assign it the value of context.Background()
 	ctx := context.Background()
 
-	engine := worker.newWasmEngine(ctx)
+	engine := worker.NewWasmEngine(ctx)
 
 	err := engine.LoadModule(ctx, "hello", "modules/hello.wasm")
 
@@ -24,9 +24,9 @@ func main() {
 		Engine: engine,
 	}
 
-	log.Println("Worker server is running on port 8080...")
+	log.Println("Worker server is running on port 7271...")
 
-	err = server.Start("8080")
+	err = server.Start("7271")
 	if err != nil {
 		log.Fatalf("Failed to start server: ", err)
 	}

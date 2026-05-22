@@ -50,7 +50,7 @@ func main() {
 
 	// Turn on the API Server
 	// This is a blocking call. The program will stay on this line forever unless the server crashes.
-	port := "8080"
+	port := "7270"
 	log.Printf("Master Gateway is LIVE on port %s.\n", port)
 
 	err := gateway.Start(port)
