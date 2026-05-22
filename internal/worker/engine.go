@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context" // manage lifecycle, kill fnc after timeout to save resources
+	"fmt"
 	"os"
 	"sync"
 
@@ -41,4 +42,17 @@ func (e *WasmEngine) LoadModule(ctx context.Context, name string, path string) e
 	e.mu.Unlock()
 
 	return nil
+}
+
+func (e *WasmEngine) Execute(ctx context.Context, moduleName string, payload string) (string, error) {
+	e.mu.RLock()
+	_, ok := e.cache[moduleName]
+	e.mu.RUnlock()
+
+	if !ok {
+		return "", fmt.Errorf("module %s not loaded", moduleName)
+	}
+
+	// Placeholder execution: echo the payload for now
+	return payload, nil
 }

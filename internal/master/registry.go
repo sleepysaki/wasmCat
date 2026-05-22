@@ -1,17 +1,17 @@
-package main
+package master
 
 import (
 	"fmt"
-	"maps"
 	"sync"
+	"time"
+	"wasmcat/internal/shared"
 )
 
 // Registry maintains the state of all active workers in the cluster
 type Registry struct {
 	workers map[string]shared.WorkerNode
 	// To handle concurrent access to the registry
-	mu	  	sync.RWMutex 
-	
+	mu sync.RWMutex
 }
 
 func NewRegistry() *Registry {
@@ -51,8 +51,8 @@ func (r *Registry) UpdateWorkerStatus(heartbeat shared.Heartbeat) error {
 }
 
 // GetActiveWorkers returns a slice of all currently active workers in the registry
-func (r *Registry) GetActiveWorkers() []shared.WorkerNode
- {	r.mu.RLock()
+func (r *Registry) GetActiveWorkers() []shared.WorkerNode {
+	r.mu.RLock()
 	defer r.mu.RUnlock()
 	activeWorkers := make([]shared.WorkerNode, 0, len(r.workers))
 	for _, worker := range r.workers {

@@ -1,4 +1,4 @@
-package main
+package master
 
 import (
 	"errors"
@@ -9,6 +9,13 @@ import (
 
 // EarthRadius is the mean radius of the Earth in kilometers.
 const EarthRadius = 6371.0
+
+type Scheduler struct{}
+
+// SelectWorker selects the best worker according to spatial distance.
+func (s *Scheduler) SelectWorker(userLat, userLon float64, workers []shared.WorkerNode) (shared.WorkerNode, error) {
+	return FindClosestWorker(userLat, userLon, workers)
+}
 
 // FindClosestWorker iterates through all active workers and returns the one physically closest to the user.
 func FindClosestWorker(userLat, userLon float64, workers []shared.WorkerNode) (shared.WorkerNode, error) {

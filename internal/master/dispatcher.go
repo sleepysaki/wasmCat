@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"wasmcat/internal/shared"
 )
 
 type Dispatcher struct {
@@ -15,12 +16,15 @@ type Dispatcher struct {
 }
 
 func (d *Dispatcher) Dispatch(req shared.ExecutionRequest) (shared.ExecutionResponse, error) {
-	workers := d.Registry.getActiveWorker()
+	workers := d.Registry.GetActiveWorkers()
 	if len(workers) == 0 {
 		return shared.ExecutionResponse{}, fmt.Errorf("no active workers available")
 	}
 
-	targetNode := d.Scheduler.SelectWorker(req.UserLatitude, req.UserLongitude, workers)
+	targetNode, err := d.Scheduler.SelectWorker(req.UserLat, req.UserLon, workers)
+	if err != nil {
+		return shared.ExecutionResponse{}, err
+	}
 
 	return d.forwardToWorker(targetNode, req)
 }

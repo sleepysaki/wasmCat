@@ -10,6 +10,7 @@ import (
 // Put pointer to registry in the gateway struct so that the handlers can access it
 type Gateway struct {
 	Registry *Registry
+	Dispatcher *Dispatcher
 }
 
 // Constructor
@@ -49,13 +50,11 @@ func (g *Gateway) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Placeholder fake node to update the LastSeen time, only need the ID to find in the map
-	update := shared.WorkerNode{
-		ID:      beat.NodeID,
-		CPUFree: beat.CPUFree,
+	// Update the worker status in the registry using the heartbeat payload
+	if err := g.Registry.UpdateWorkerStatus(beat); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
 	}
-
-	g.Registry.RegisterNode(update)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -72,7 +71,10 @@ func (g *Gateway) Start(port string) error {
 
 func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	var req shared.ExecutionRequest
-	json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid execution request", http.StatusBadRequest)
+		return
+	}
 
 	// Tell the Dispatcher to find a worker and run the code
 	result, err := g.Dispatcher.Dispatch(req)
