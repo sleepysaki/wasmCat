@@ -9,7 +9,7 @@ import (
 // Web server for the Master node
 // Put pointer to registry in the gateway struct so that the handlers can access it
 type Gateway struct {
-	Registry *Registry
+	Registry   *Registry
 	Dispatcher *Dispatcher
 }
 

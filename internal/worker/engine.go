@@ -11,9 +11,9 @@ import (
 
 type WasmEngine struct {
 	// Store wazero.Runtime aka engine and image caches to avoid reloading and recompiling for each execution
-	runtime	wazero.Runtime
-	cache	map[string]wazero.CompiledModule
-	mu		sync.RWMutex
+	runtime wazero.Runtime
+	cache   map[string]wazero.CompiledModule
+	mu      sync.RWMutex
 }
 
 func NewWasmEngine(ctx context.Context) *WasmEngine {
