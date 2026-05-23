@@ -64,6 +64,7 @@ func (g *Gateway) Start(port string) error {
 	// Internal routes for the cluster infrastructure
 	http.HandleFunc("/internal/register", g.handleRegister)
 	http.HandleFunc("/internal/heartbeat", g.handleHeartbeat)
+	http.HandleFunc("/api/v1/execute", g.handleExecute)
 
 	// Start the server
 	return http.ListenAndServe(":"+port, nil)

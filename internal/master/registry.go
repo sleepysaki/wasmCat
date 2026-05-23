@@ -26,6 +26,9 @@ func (r *Registry) RegisterWorker(worker shared.WorkerNode) {
 	r.mu.Lock()
 	// Unlock memory after the function returns, ensuring it happens even if there's an error -> prevents deadlocks
 	defer r.mu.Unlock()
+	if worker.LastSeen.IsZero() {
+		worker.LastSeen = time.Now()
+	}
 	r.workers[worker.ID] = worker
 	fmt.Printf("Worker %s registered with IP %s\n", worker.ID, worker.IPAddress)
 }
