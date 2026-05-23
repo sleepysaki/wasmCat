@@ -19,7 +19,7 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	// tell the decoder to read from the request body and decode into the req struct
 	// & means its value is stored at an address, so we can modify it inside the function
 	err := json.NewDecoder(r.Body).Decode(&req)
-	result, err := s.Engine.Execute(r.Context(), req.ModuleName, req.Payload)
+	result, err := s.Engine.Execute(r.Context(), req.ModuleName, req.ModuleURL, req.Payload)
 
 	// Error handling in case user send bad JSON / nonexistent module
 	if err != nil {

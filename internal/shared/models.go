@@ -9,8 +9,8 @@ type WorkerNode struct {
 	Latitude  float64   `json:"latitude"`
 	Longitude float64   `json:"longitude"`
 	CPUFree   float64   `json:"cpu_free"`
-	RAMFreeMB float64   `json:"ram_free_mb"` 
-	LastSeen  time.Time `json:"last_seen"`   
+	RAMFreeMB float64   `json:"ram_free_mb"`
+	LastSeen  time.Time `json:"last_seen"`
 }
 
 // Heartbeat: the payload sent every 5 seconds by the Worker to update its status
@@ -25,12 +25,13 @@ type Heartbeat struct {
 
 // ExecutionRequest: payload sent from the End-User to the Master, then forwarded from the Master to the chosen Worker
 type ExecutionRequest struct {
-	// The target Wasm module to run 
+	// The target Wasm module to run
 	ModuleName string `json:"module_name"`
-	
+
 	// The raw string or JSON data to process
-	Payload string `json:"payload"`
-	
+	Payload   string `json:"payload"`
+	ModuleURL string `json:"module_url"`
+
 	// User's location to run Haversine formula
 	// "omitempty" means if the Master forwards this to the Worker, it can drop these
 	// fields to save bandwidth, since the Worker doesn't care about GPS.
@@ -43,17 +44,17 @@ type ExecutionRequest struct {
 type ExecutionResponse struct {
 	// The actual output returned from the Wasm linear memory
 	Result string `json:"result"`
-	
-	// For benchmarks later, measure exec time 
+
+	// For benchmarks later, measure exec time
 	ExecutionTimeMs float64 `json:"execution_time_ms"`
-	
+
 	ExecutedOnNodeID string `json:"executed_on_node_id"`
-	
+
 	// If something breaks inside wazero, it passes the error here
 	Error string `json:"error,omitempty"`
 }
 
-// UTILITY MODELS 
+// UTILITY MODELS
 
 // APIResponse is a standard wrapper for basic success/failure messages
 // (e.g., when a worker registers successfully, return this).

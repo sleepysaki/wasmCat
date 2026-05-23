@@ -13,13 +13,6 @@ func main() {
 
 	engine := worker.NewWasmEngine(ctx)
 
-	err := engine.LoadModule(ctx, "hello", "modules/hello.wasm")
-
-	// if there is an error loading the module, print the error and exit the program
-	if err != nil {
-		log.Fatalf("Failed to load module: %v", err) // Fixed: Added %v
-	}
-
 	server := &worker.WorkerServer{
 		Engine: engine,
 	}
@@ -29,7 +22,7 @@ func main() {
 	go worker.StartTelemetry(ctx, "http://localhost:7270", "worker-vn-01", "localhost:7271")
 
 	log.Println("Worker server is running on port 7271...")
-	err = server.Start("7271")
+	err := server.Start("7271")
 	if err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}

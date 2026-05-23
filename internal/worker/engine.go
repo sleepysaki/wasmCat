@@ -3,7 +3,8 @@ package worker
 import (
 	"context" // manage lifecycle, kill fnc after timeout to save resources
 	"fmt"
-	"os"
+	"io"
+	"net/http"
 	"sync"
 
 	"github.com/tetratelabs/wazero"
@@ -23,32 +24,60 @@ func NewWasmEngine(ctx context.Context) *WasmEngine {
 	}
 }
 
-func (e *WasmEngine) LoadModule(ctx context.Context, name string, path string) error {
-	// Read file from storage
-	wasmBytes, err := os.ReadFile(path)
-	if err != nil {
-		return err
+func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL string) error {
+	e.mu.RLock()
+	_, ok := e.cache[moduleName]
+	e.mu.RUnlock()
+	if ok {
+		return nil
 	}
 
-	// Compile
+	if moduleURL == "" {
+		return fmt.Errorf("module %s has no module URL", moduleName)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, moduleURL, nil)
+	if err != nil {
+		return fmt.Errorf("create request for %s: %w", moduleURL, err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("download %s: %w", moduleURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download %s: unexpected status %s", moduleURL, resp.Status)
+	}
+
+	wasmBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", moduleURL, err)
+	}
+
 	compiled, err := e.runtime.CompileModule(ctx, wasmBytes)
 	if err != nil {
-		return err
+		return fmt.Errorf("compile %s: %w", moduleName, err)
 	}
 
-	// Save in cache
 	e.mu.Lock()
-	e.cache[name] = compiled
+	if _, exists := e.cache[moduleName]; !exists {
+		e.cache[moduleName] = compiled
+	}
 	e.mu.Unlock()
 
 	return nil
 }
 
-func (e *WasmEngine) Execute(ctx context.Context, moduleName string, payload string) (string, error) {
+func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL string, payload string) (string, error) {
+	if err := e.FetchAndCache(ctx, moduleName, moduleURL); err != nil {
+		return "", err
+	}
+
 	e.mu.RLock()
 	_, ok := e.cache[moduleName]
 	e.mu.RUnlock()
-
 	if !ok {
 		return "", fmt.Errorf("module %s not loaded", moduleName)
 	}
