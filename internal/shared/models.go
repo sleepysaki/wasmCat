@@ -31,6 +31,8 @@ type ExecutionRequest struct {
 	// The raw string or JSON data to process
 	Payload   string `json:"payload"`
 	ModuleURL string `json:"module_url"`
+	ModuleRegistryURL string `json:"module_registry_url,omitempty"`
+	JITBearerToken    string `json:"jit_bearer_token,omitempty"`
 
 	// User's location to run Haversine formula
 	// "omitempty" means if the Master forwards this to the Worker, it can drop these

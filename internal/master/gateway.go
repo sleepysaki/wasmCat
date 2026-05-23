@@ -103,7 +103,7 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Tell the Dispatcher to find a worker and run the code
-	result, err := g.Dispatcher.Dispatch(req)
+	result, err := g.Dispatcher.Dispatch(r.Context(), req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return

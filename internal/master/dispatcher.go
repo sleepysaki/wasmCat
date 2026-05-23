@@ -1,10 +1,12 @@
 package master
 
 import (
+	"context"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"wasmcat/internal/security"
@@ -18,7 +20,26 @@ type Dispatcher struct {
 	Scheduler *Scheduler
 }
 
-func (d *Dispatcher) Dispatch(req shared.ExecutionRequest) (shared.ExecutionResponse, error) {
+func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) (shared.ExecutionResponse, error) {
+	moduleRegistryURL := req.ModuleURL
+	if moduleRegistryURL == "" {
+		moduleRegistryURL = req.ModuleRegistryURL
+	}
+	req.ModuleURL = moduleRegistryURL
+	req.ModuleRegistryURL = moduleRegistryURL
+
+	if strings.Contains(moduleRegistryURL, "azurecr.io") {
+		registryName, repositoryName, err := parseACRReference(moduleRegistryURL)
+		if err != nil {
+			return shared.ExecutionResponse{}, err
+		}
+		token, err := GenerateACRToken(ctx, registryName, repositoryName)
+		if err != nil {
+			return shared.ExecutionResponse{}, err
+		}
+		req.JITBearerToken = token
+	}
+
 	workers := d.Registry.GetActiveWorkers()
 	if len(workers) == 0 {
 		return shared.ExecutionResponse{}, fmt.Errorf("no active workers available")
@@ -30,6 +51,36 @@ func (d *Dispatcher) Dispatch(req shared.ExecutionRequest) (shared.ExecutionResp
 	}
 
 	return d.forwardToWorker(targetNode, req)
+}
+
+func parseACRReference(moduleRegistryURL string) (string, string, error) {
+	parsedURL, err := url.Parse(moduleRegistryURL)
+	if err != nil {
+		return "", "", fmt.Errorf("parse module registry url: %w", err)
+	}
+
+	hostname := parsedURL.Hostname()
+	if !strings.HasSuffix(hostname, ".azurecr.io") {
+		return "", "", fmt.Errorf("module registry url is not an azure container registry")
+	}
+
+	registryName := strings.TrimSuffix(hostname, ".azurecr.io")
+	path := strings.Trim(parsedURL.Path, "/")
+	if path == "" {
+		return "", "", fmt.Errorf("missing repository path in module registry url")
+	}
+
+	segments := strings.Split(path, "/")
+	repositoryName := segments[0]
+	if repositoryName == "v2" && len(segments) > 1 {
+		repositoryName = segments[1]
+	}
+
+	if repositoryName == "" {
+		return "", "", fmt.Errorf("missing repository name in module registry url")
+	}
+
+	return registryName, repositoryName, nil
 }
 
 func (d *Dispatcher) forwardToWorker(node shared.WorkerNode, req shared.ExecutionRequest) (shared.ExecutionResponse, error) {
