@@ -15,11 +15,12 @@ func main() {
 
 	server := &worker.WorkerServer{
 		Engine: engine,
+		NodeID: "worker-vn-01",
 	}
 
 	// This runs in the background and pings the Master every 5 seconds
 	log.Println("Starting telemetry pulse to Master node...")
-	go worker.StartTelemetry(ctx, "http://localhost:7270", "worker-vn-01", "localhost:7271")
+	go worker.StartTelemetry(ctx, "https://localhost:7270", "worker-vn-01", "localhost:7271")
 
 	log.Println("Worker server is running on port 7271...")
 	err := server.Start("7271")

@@ -2,14 +2,20 @@
 package worker
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json" // turn go struct into json and vice versa
-	"net/http"      // http server to listen for requests from the main process and respond with results
+	"fmt"
+	"net/http" // http server to listen for requests from the main process and respond with results
+	"os"
+	"path/filepath"
 	"wasmcat/internal/shared"
 )
 
 // Dependency injection -> inject engine into server struct so the server can call its methods
 type WorkerServer struct {
 	Engine *WasmEngine
+	NodeID string
 }
 
 // Logic handler
@@ -36,6 +42,28 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 func (s *WorkerServer) Start(port string) error {
 	// run handleInvoke when getting a request to /invoke endpoint
 	http.HandleFunc("/invoke", s.handleInvoke)
-	// start the server on the specified port and listen for requests
-	return http.ListenAndServe(":"+port, nil)
+
+	caPEM, err := os.ReadFile(filepath.Join("./certs", "ca.crt"))
+	if err != nil {
+		return fmt.Errorf("read ca cert: %w", err)
+	}
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caPEM) {
+		return fmt.Errorf("append ca cert")
+	}
+
+	tlsConfig := &tls.Config{
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  caPool,
+		MinVersion: tls.VersionTLS12,
+	}
+
+	server := &http.Server{
+		Addr:      ":" + port,
+		TLSConfig: tlsConfig,
+	}
+
+	certFile := filepath.Join("./certs", fmt.Sprintf("worker-%s.crt", s.NodeID))
+	keyFile := filepath.Join("./certs", fmt.Sprintf("worker-%s.key", s.NodeID))
+	return server.ListenAndServeTLS(certFile, keyFile)
 }

@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 	"wasmcat/internal/master"
+	"wasmcat/internal/security"
 )
 
 func main() {
@@ -34,6 +35,9 @@ func main() {
 	}
 
 	// Background Processes
+	if err := security.GenerateCAAndCerts("worker-vn-01"); err != nil {
+		log.Fatalf("failed to generate local certs: %v", err)
+	}
 
 	// Start the background garbage collection
 	// Run completely independently of the web server

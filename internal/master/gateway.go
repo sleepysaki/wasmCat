@@ -1,8 +1,13 @@
 package master
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"wasmcat/internal/shared"
 )
 
@@ -66,8 +71,28 @@ func (g *Gateway) Start(port string) error {
 	http.HandleFunc("/internal/heartbeat", g.handleHeartbeat)
 	http.HandleFunc("/api/v1/execute", g.handleExecute)
 
-	// Start the server
-	return http.ListenAndServe(":"+port, nil)
+	caPEM, err := os.ReadFile(filepath.Join("./certs", "ca.crt"))
+	if err != nil {
+		return fmt.Errorf("read ca cert: %w", err)
+	}
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caPEM) {
+		return fmt.Errorf("append ca cert")
+	}
+
+	serverTLSConfig := &tls.Config{
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  caPool,
+		MinVersion: tls.VersionTLS12,
+	}
+
+	server := &http.Server{
+		Addr:      ":" + port,
+		Handler:   nil,
+		TLSConfig: serverTLSConfig,
+	}
+
+	return server.ListenAndServeTLS(filepath.Join("./certs", "master.crt"), filepath.Join("./certs", "master.key"))
 }
 
 func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {

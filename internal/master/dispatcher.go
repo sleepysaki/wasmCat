@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"strings"
+	"wasmcat/internal/security"
 	"wasmcat/internal/shared"
 )
 
@@ -34,10 +37,21 @@ func (d *Dispatcher) forwardToWorker(node shared.WorkerNode, req shared.Executio
 	data, _ := json.Marshal(req)
 
 	// Build the Worker's URL
-	url := fmt.Sprintf("http://%s/invoke", node.IPAddress)
+	url := fmt.Sprintf("https://%s/invoke", strings.TrimPrefix(node.IPAddress, "https://"))
+
+	client, err := security.NewMTLSHTTPClient(filepath.Join("./certs", "master.crt"), filepath.Join("./certs", "master.key"), filepath.Join("./certs", "ca.crt"))
+	if err != nil {
+		return shared.ExecutionResponse{}, err
+	}
 
 	// Send the request
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(data))
+	reqHTTP, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
+	if err != nil {
+		return shared.ExecutionResponse{}, err
+	}
+	reqHTTP.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(reqHTTP)
 	if err != nil {
 		return shared.ExecutionResponse{}, err
 	}

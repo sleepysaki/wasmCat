@@ -3,9 +3,14 @@ package worker
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 	"wasmcat/internal/shared"
 )
@@ -13,7 +18,13 @@ import (
 // StartTelemetry begins sending heartbeats to the Master node.
 // masterURL should be something like "http://localhost:8080"
 func StartTelemetry(ctx context.Context, masterURL string, nodeID string, workerAddress string) {
-	registerWorker(masterURL, nodeID, workerAddress)
+	client, err := newMTLSClient(nodeID)
+	if err != nil {
+		log.Printf("telemetry client init error: %v\n", err)
+		return
+	}
+
+	registerWorker(client, masterURL, nodeID, workerAddress)
 	// Create a ticker that fires every 5 seconds
 	// time.Sleep() in a loop is not used because it can block thread, no easy cancellation, and less accurate
 	ticker := time.NewTicker(5 * time.Second)
@@ -26,14 +37,44 @@ func StartTelemetry(ctx context.Context, masterURL string, nodeID string, worker
 			log.Println("Telemetry stopped")
 			return
 		case <-ticker.C:
-			registerWorker(masterURL, nodeID, workerAddress)
+			registerWorker(client, masterURL, nodeID, workerAddress)
 			// Send heartbeat to Master
-			sendHeartbeat(masterURL, nodeID)
+			sendHeartbeat(client, masterURL, nodeID)
 		}
 	}
 }
 
-func registerWorker(masterURL string, nodeID string, workerAddress string) {
+func newMTLSClient(nodeID string) (*http.Client, error) {
+	certFile := filepath.Join("./certs", fmt.Sprintf("worker-%s.crt", nodeID))
+	keyFile := filepath.Join("./certs", fmt.Sprintf("worker-%s.key", nodeID))
+	caFile := filepath.Join("./certs", "ca.crt")
+
+	clientCert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load worker cert: %w", err)
+	}
+
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("read ca cert: %w", err)
+	}
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("append ca cert")
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			Certificates: []tls.Certificate{clientCert},
+			RootCAs:      caPool,
+			MinVersion:   tls.VersionTLS12,
+		},
+	}
+
+	return &http.Client{Transport: transport}, nil
+}
+
+func registerWorker(client *http.Client, masterURL string, nodeID string, workerAddress string) {
 	node := shared.WorkerNode{
 		ID:        nodeID,
 		IPAddress: workerAddress,
@@ -46,7 +87,14 @@ func registerWorker(masterURL string, nodeID string, workerAddress string) {
 	}
 
 	endpoint := masterURL + "/internal/register"
-	resp, err := http.Post(endpoint, "application/json", bytes.NewBuffer(data))
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(data))
+	if err != nil {
+		log.Printf("failed to build worker registration request: %v\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Failed to register worker with Master: %v\n", err)
 		return
@@ -59,7 +107,7 @@ func registerWorker(masterURL string, nodeID string, workerAddress string) {
 }
 
 // Construct a Heartbeat struct, convert to JSON, send to the Master node via HTTP POST
-func sendHeartbeat(masterURL string, nodeID string) {
+func sendHeartbeat(client *http.Client, masterURL string, nodeID string) {
 	// Create the payload, temp hardcode value
 	beat := shared.Heartbeat{
 		NodeID:    nodeID,
@@ -76,7 +124,14 @@ func sendHeartbeat(masterURL string, nodeID string) {
 
 	// Send the HTTP POST request to the Master
 	endpoint := masterURL + "/internal/heartbeat"
-	resp, err := http.Post(endpoint, "application/json", bytes.NewBuffer(data))
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(data))
+	if err != nil {
+		log.Printf("Failed to build heartbeat request: %v\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 
 	if err != nil {
 		log.Printf("Failed to reach Master: %v\n", err)
