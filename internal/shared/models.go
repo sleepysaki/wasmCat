@@ -29,8 +29,8 @@ type ExecutionRequest struct {
 	ModuleName string `json:"module_name"`
 
 	// The raw string or JSON data to process
-	Payload   string `json:"payload"`
-	ModuleURL string `json:"module_url"`
+	Payload           string `json:"payload"`
+	ModuleURL         string `json:"module_url"`
 	ModuleRegistryURL string `json:"module_registry_url,omitempty"`
 	JITBearerToken    string `json:"jit_bearer_token,omitempty"`
 
