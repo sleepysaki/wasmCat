@@ -25,17 +25,25 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	// tell the decoder to read from the request body and decode into the req struct
 	// & means its value is stored at an address, so we can modify it inside the function
 	err := json.NewDecoder(r.Body).Decode(&req)
-	result, err := s.Engine.Execute(r.Context(), req.ModuleName, req.ModuleURL, req.Payload)
-
 	// Error handling in case user send bad JSON / nonexistent module
+	if err != nil {
+		http.Error(w, "Bad Request: invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Now that JSON is valid, ask the engine to run the module.
+	// r.Context() connects execution to the HTTP request, so cancellation can flow downward.
+	result, err := s.Engine.Execute(r.Context(), req.ModuleName, req.ModuleURL, req.Payload)
 	if err != nil {
 		http.Error(w, "Bad Request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	// Wrap the output in the shared response model so the master and user see the same shape.
 	resp := shared.ExecutionResponse{
 		Result: result,
 	}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
 
