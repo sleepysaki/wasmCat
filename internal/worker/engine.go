@@ -24,7 +24,7 @@ func NewWasmEngine(ctx context.Context) *WasmEngine {
 	}
 }
 
-func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL string) error {
+func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL string, bearerToken string) error {
 	// First check the cache with a read lock.
 	// Read locks let many goroutines check the map at the same time,
 	// which is useful because most executions should use an already compiled module.
@@ -46,6 +46,11 @@ func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL st
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, moduleURL, nil)
 	if err != nil {
 		return fmt.Errorf("create request for %s: %w", moduleURL, err)
+	}
+	if bearerToken != "" {
+		// Private registries like ACR expect the pull token in the Authorization header.
+		// The master mints this token and forwards it to the worker as JITBearerToken.
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
 	}
 
 	// Download the raw .wasm bytes.
@@ -86,10 +91,10 @@ func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL st
 	return nil
 }
 
-func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL string, payload string) (string, error) {
+func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL string, payload string, bearerToken string) (string, error) {
 	// Make sure the module is compiled and available.
 	// FetchAndCache downloads only on the first request for this module name.
-	if err := e.FetchAndCache(ctx, moduleName, moduleURL); err != nil {
+	if err := e.FetchAndCache(ctx, moduleName, moduleURL, bearerToken); err != nil {
 		return "", err
 	}
 

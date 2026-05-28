@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -62,7 +63,7 @@ func TestWasmEngineExecute(t *testing.T) {
 	engine := NewWasmEngine(ctx)
 
 	// First execution downloads, compiles, instantiates, writes input memory, calls run, and reads output memory.
-	result, err := engine.Execute(ctx, "echo", moduleServer.URL, "hello wasm")
+	result, err := engine.Execute(ctx, "echo", moduleServer.URL, "hello wasm", "")
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestWasmEngineExecute(t *testing.T) {
 
 	// Second execution should use the compiled module cache.
 	// It still gets a fresh instance, but it should not download the same module again.
-	result, err = engine.Execute(ctx, "echo", moduleServer.URL, "cached")
+	result, err = engine.Execute(ctx, "echo", moduleServer.URL, "cached", "")
 	if err != nil {
 		t.Fatalf("Execute from cache returned error: %v", err)
 	}
@@ -81,5 +82,29 @@ func TestWasmEngineExecute(t *testing.T) {
 	}
 	if downloads != 1 {
 		t.Fatalf("expected module to be downloaded once, downloaded %d times", downloads)
+	}
+}
+
+func TestWasmEngineFetchAndCacheUsesBearerToken(t *testing.T) {
+	ctx := context.Background()
+
+	// This does not need to be a valid Wasm module because this test checks the HTTP fetch layer.
+	// The server returns 401 unless the worker sends the bearer token from the master.
+	moduleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		w.Write([]byte("not really wasm"))
+	}))
+	defer moduleServer.Close()
+
+	engine := NewWasmEngine(ctx)
+	err := engine.FetchAndCache(ctx, "private-module", moduleServer.URL, "test-token")
+	if err == nil {
+		t.Fatal("expected compile error after authorized download")
+	}
+	if !strings.Contains(err.Error(), "compile private-module") {
+		t.Fatalf("expected authorized fetch to reach compile step, got %v", err)
 	}
 }

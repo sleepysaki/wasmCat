@@ -71,11 +71,21 @@ func parseACRReference(moduleRegistryURL string) (string, string, error) {
 	}
 
 	segments := strings.Split(path, "/")
-	repositoryName := segments[0]
-	if repositoryName == "v2" && len(segments) > 1 {
-		repositoryName = segments[1]
+	if segments[0] == "v2" {
+		segments = segments[1:]
 	}
 
+	// ACR is an OCI registry, so repository names can contain slashes.
+	// For a blob URL like /v2/team/echo/blobs/sha256:abc, the token scope must be
+	// repository:team/echo:pull, not just repository:team:pull.
+	repositoryEnd := len(segments)
+	for i, segment := range segments {
+		if segment == "blobs" || segment == "manifests" || segment == "tags" || segment == "referrers" {
+			repositoryEnd = i
+			break
+		}
+	}
+	repositoryName := strings.Join(segments[:repositoryEnd], "/")
 	if repositoryName == "" {
 		return "", "", fmt.Errorf("missing repository name in module registry url")
 	}
