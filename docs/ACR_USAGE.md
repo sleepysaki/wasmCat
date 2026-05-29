@@ -4,19 +4,28 @@ This project can fetch a private WASM module from Azure Container Registry when 
 
 ## Current Support
 
-The current implementation supports direct OCI registry URLs that point to downloadable content, for example:
+The current implementation supports OCI manifest URLs, for example:
+
+```text
+https://myregistry.azurecr.io/v2/team/echo/manifests/latest
+https://myregistry.azurecr.io/v2/team/echo/manifests/sha256:<manifest-digest>
+```
+
+The master resolves the manifest into a downloadable blob URL before sending work to the worker:
 
 ```text
 https://myregistry.azurecr.io/v2/team/echo/blobs/sha256:<digest>
 ```
 
-The master detects `azurecr.io`, mints a repository-scoped pull token using `DefaultAzureCredential`, forwards that token to the worker as `jit_bearer_token`, and the worker sends it as:
+Direct blob URLs are still supported too.
+
+The master detects `azurecr.io`, mints a repository-scoped pull token using `DefaultAzureCredential`, fetches the manifest when needed, forwards the pull token to the worker as `jit_bearer_token`, and the worker sends it as:
 
 ```text
 Authorization: Bearer <token>
 ```
 
-Tag or manifest resolution is not implemented yet. If you send a tag URL such as `/manifests/latest`, the worker will download the manifest JSON, not the actual `.wasm` bytes, and compilation will fail.
+Manifest resolution is intentionally handled by the master. The worker stays simple: it downloads the final WASM bytes, compiles them, and executes the module.
 
 ## Azure Identity Setup
 
@@ -38,7 +47,7 @@ Send the module URL through `module_url` or `module_registry_url`:
 ```json
 {
   "module_name": "echo",
-  "module_url": "https://myregistry.azurecr.io/v2/team/echo/blobs/sha256:<digest>",
+  "module_url": "https://myregistry.azurecr.io/v2/team/echo/manifests/latest",
   "payload": "hello wasm",
   "user_lat": 10.762622,
   "user_lon": 106.660172
@@ -76,7 +85,7 @@ low 32 bits  = output length
 ## Known Limitations
 
 - The worker performs a simple HTTP GET and compiles the response body as raw WASM.
-- OCI manifest lookup is not implemented.
+- Manifest layer selection is conservative: one layer is accepted, or a known WASM media type is selected from multiple layers.
 - Token caching is not implemented; the master mints a token per ACR execution request.
 - Module download size limits and HTTP client timeouts are still needed.
 - The worker cache key is `module_name`, so changing a digest while reusing the same name may keep the old compiled module until restart.

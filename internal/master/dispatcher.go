@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"wasmcat/internal/security"
@@ -28,16 +27,22 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) 
 	req.ModuleURL = moduleRegistryURL
 	req.ModuleRegistryURL = moduleRegistryURL
 
-	if strings.Contains(moduleRegistryURL, "azurecr.io") {
-		registryName, repositoryName, err := parseACRReference(moduleRegistryURL)
+	if isACRURL(moduleRegistryURL) {
+		ref, err := parseACRModuleReference(moduleRegistryURL)
 		if err != nil {
 			return shared.ExecutionResponse{}, err
 		}
-		token, err := GenerateACRToken(ctx, registryName, repositoryName)
+		token, err := GenerateACRToken(ctx, ref.RegistryName, ref.RepositoryName)
 		if err != nil {
 			return shared.ExecutionResponse{}, err
 		}
 		req.JITBearerToken = token
+
+		resolvedModuleURL, err := resolveACRModuleURL(ctx, moduleRegistryURL, token, ref)
+		if err != nil {
+			return shared.ExecutionResponse{}, err
+		}
+		req.ModuleURL = resolvedModuleURL
 	}
 
 	workers := d.Registry.GetActiveWorkers()
@@ -51,46 +56,6 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) 
 	}
 
 	return d.forwardToWorker(targetNode, req)
-}
-
-func parseACRReference(moduleRegistryURL string) (string, string, error) {
-	parsedURL, err := url.Parse(moduleRegistryURL)
-	if err != nil {
-		return "", "", fmt.Errorf("parse module registry url: %w", err)
-	}
-
-	hostname := parsedURL.Hostname()
-	if !strings.HasSuffix(hostname, ".azurecr.io") {
-		return "", "", fmt.Errorf("module registry url is not an azure container registry")
-	}
-
-	registryName := strings.TrimSuffix(hostname, ".azurecr.io")
-	path := strings.Trim(parsedURL.Path, "/")
-	if path == "" {
-		return "", "", fmt.Errorf("missing repository path in module registry url")
-	}
-
-	segments := strings.Split(path, "/")
-	if segments[0] == "v2" {
-		segments = segments[1:]
-	}
-
-	// ACR is an OCI registry, so repository names can contain slashes.
-	// For a blob URL like /v2/team/echo/blobs/sha256:abc, the token scope must be
-	// repository:team/echo:pull, not just repository:team:pull.
-	repositoryEnd := len(segments)
-	for i, segment := range segments {
-		if segment == "blobs" || segment == "manifests" || segment == "tags" || segment == "referrers" {
-			repositoryEnd = i
-			break
-		}
-	}
-	repositoryName := strings.Join(segments[:repositoryEnd], "/")
-	if repositoryName == "" {
-		return "", "", fmt.Errorf("missing repository name in module registry url")
-	}
-
-	return registryName, repositoryName, nil
 }
 
 func (d *Dispatcher) forwardToWorker(node shared.WorkerNode, req shared.ExecutionRequest) (shared.ExecutionResponse, error) {
