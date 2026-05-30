@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
 	"wasmcat/internal/config"
 	"wasmcat/internal/logging"
 	"wasmcat/internal/worker"
@@ -13,7 +16,8 @@ func main() {
 
 	// empty context that can be used to set timeouts, cancel fnc, etc
 	// := is a shorthand for declaring and initializing a variable in one line -> create new variable called ctx and assign it the value of context.Background()
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	cfg, err := config.LoadWorker()
 	if err != nil {
@@ -40,7 +44,7 @@ func main() {
 	go worker.StartTelemetry(ctx, cfg.MasterURL, cfg.NodeID, cfg.AdvertiseAddress, cfg.HeartbeatInterval)
 
 	slog.Info("worker server live", "port", cfg.Port, "worker_id", cfg.NodeID)
-	err = server.Start(cfg.Port)
+	err = server.Start(ctx, cfg.Port)
 	if err != nil {
 		slog.Error("worker server crashed", "error", err)
 	}

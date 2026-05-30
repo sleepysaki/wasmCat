@@ -1,13 +1,16 @@
 package master
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 	"wasmcat/internal/logging"
 	"wasmcat/internal/shared"
 )
@@ -96,7 +99,7 @@ func (g *Gateway) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 // Start the HTTP server and set up the routes for worker registration and heartbeat
-func (g *Gateway) Start(port string) error {
+func (g *Gateway) Start(ctx context.Context, port string) error {
 	caPEM, err := os.ReadFile(filepath.Join("./certs", "ca.crt"))
 	if err != nil {
 		return fmt.Errorf("read ca cert: %w", err)
@@ -118,7 +121,30 @@ func (g *Gateway) Start(port string) error {
 		TLSConfig: serverTLSConfig,
 	}
 
-	return server.ListenAndServeTLS(filepath.Join("./certs", "master.crt"), filepath.Join("./certs", "master.key"))
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ListenAndServeTLS(filepath.Join("./certs", "master.crt"), filepath.Join("./certs", "master.key"))
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		slog.Info("master gateway shutdown requested")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("shutdown master gateway: %w", err)
+		}
+		if err := <-errCh; err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		slog.Info("master gateway stopped")
+		return nil
+	}
 }
 
 func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {

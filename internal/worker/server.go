@@ -2,13 +2,16 @@
 package worker
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json" // turn go struct into json and vice versa
 	"fmt"
+	"log/slog"
 	"net/http" // http server to listen for requests from the main process and respond with results
 	"os"
 	"path/filepath"
+	"time"
 	"wasmcat/internal/logging"
 	"wasmcat/internal/shared"
 )
@@ -86,7 +89,7 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	shared.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (s *WorkerServer) Start(port string) error {
+func (s *WorkerServer) Start(ctx context.Context, port string) error {
 	caPEM, err := os.ReadFile(filepath.Join("./certs", "ca.crt"))
 	if err != nil {
 		return fmt.Errorf("read ca cert: %w", err)
@@ -110,5 +113,29 @@ func (s *WorkerServer) Start(port string) error {
 
 	certFile := filepath.Join("./certs", fmt.Sprintf("worker-%s.crt", s.NodeID))
 	keyFile := filepath.Join("./certs", fmt.Sprintf("worker-%s.key", s.NodeID))
-	return server.ListenAndServeTLS(certFile, keyFile)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ListenAndServeTLS(certFile, keyFile)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		slog.Info("worker server shutdown requested", "worker_id", s.NodeID)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("shutdown worker server: %w", err)
+		}
+		if err := <-errCh; err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		slog.Info("worker server stopped", "worker_id", s.NodeID)
+		return nil
+	}
 }

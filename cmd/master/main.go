@@ -1,7 +1,11 @@
 package main
 
 import (
+	"context"
 	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 	"wasmcat/internal/config"
 	"wasmcat/internal/logging"
@@ -12,6 +16,9 @@ import (
 func main() {
 	logging.Configure("master")
 	slog.Info("initializing control plane")
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	cfg, err := config.LoadMaster()
 	if err != nil {
@@ -54,9 +61,16 @@ func main() {
 	// Every 15 seconds, it scrubs the Registry for dead edge nodes
 	go func() {
 		slog.Info("background reaper started", "interval", cfg.CleanupInterval.String())
+		ticker := time.NewTicker(cfg.CleanupInterval)
+		defer ticker.Stop()
 		for {
-			time.Sleep(cfg.CleanupInterval)
-			reg.Cleanup()
+			select {
+			case <-ctx.Done():
+				slog.Info("background reaper stopped")
+				return
+			case <-ticker.C:
+				reg.Cleanup()
+			}
 		}
 	}()
 
@@ -66,7 +80,7 @@ func main() {
 	// This is a blocking call. The program will stay on this line forever unless the server crashes.
 	slog.Info("master gateway live", "port", cfg.Port)
 
-	err = gateway.Start(cfg.Port)
+	err = gateway.Start(ctx, cfg.Port)
 	if err != nil {
 		slog.Error("master gateway crashed", "error", err)
 	}
