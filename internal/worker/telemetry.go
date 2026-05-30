@@ -7,7 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,7 +24,7 @@ func StartTelemetry(ctx context.Context, masterURL string, nodeID string, worker
 
 	client, err := newMTLSClient(nodeID)
 	if err != nil {
-		log.Printf("telemetry client init error: %v\n", err)
+		slog.Error("telemetry client init error", "worker_id", nodeID, "error", err)
 		return
 	}
 
@@ -38,7 +38,7 @@ func StartTelemetry(ctx context.Context, masterURL string, nodeID string, worker
 		select {
 		case <-ctx.Done():
 			// Context cancelled, exit the function
-			log.Println("Telemetry stopped")
+			slog.Info("telemetry stopped", "worker_id", nodeID)
 			return
 		case <-ticker.C:
 			registerWorker(client, masterURL, nodeID, workerAddress)
@@ -86,28 +86,30 @@ func registerWorker(client *http.Client, masterURL string, nodeID string, worker
 
 	data, err := json.Marshal(node)
 	if err != nil {
-		log.Printf("Telemetry register error: %v\n", err)
+		slog.Error("telemetry register marshal error", "worker_id", nodeID, "error", err)
 		return
 	}
 
 	endpoint := masterURL + "/internal/register"
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(data))
 	if err != nil {
-		log.Printf("failed to build worker registration request: %v\n", err)
+		slog.Error("failed to build worker registration request", "worker_id", nodeID, "error", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Failed to register worker with Master: %v\n", err)
+		slog.Error("failed to register worker with master", "worker_id", nodeID, "master_url", masterURL, "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		log.Printf("Worker registration failed: %s", resp.Status)
+		slog.Warn("worker registration rejected", "worker_id", nodeID, "status", resp.Status)
+		return
 	}
+	slog.Info("worker registration sent", "worker_id", nodeID, "master_url", masterURL, "status", resp.StatusCode)
 }
 
 // Construct a Heartbeat struct, convert to JSON, send to the Master node via HTTP POST
@@ -122,7 +124,7 @@ func sendHeartbeat(client *http.Client, masterURL string, nodeID string) {
 	// Convert struct to JSON bytes
 	data, err := json.Marshal(beat)
 	if err != nil {
-		log.Printf("Telemetry error: %v\n", err)
+		slog.Error("heartbeat marshal error", "worker_id", nodeID, "error", err)
 		return
 	}
 
@@ -130,7 +132,7 @@ func sendHeartbeat(client *http.Client, masterURL string, nodeID string) {
 	endpoint := masterURL + "/internal/heartbeat"
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(data))
 	if err != nil {
-		log.Printf("Failed to build heartbeat request: %v\n", err)
+		slog.Error("failed to build heartbeat request", "worker_id", nodeID, "error", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -138,11 +140,11 @@ func sendHeartbeat(client *http.Client, masterURL string, nodeID string) {
 	resp, err := client.Do(req)
 
 	if err != nil {
-		log.Printf("Failed to reach Master: %v\n", err)
+		slog.Error("failed to reach master heartbeat endpoint", "worker_id", nodeID, "master_url", masterURL, "error", err)
 		return
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
-		log.Printf("Heartbeat rejected: %s", resp.Status)
+		slog.Warn("heartbeat rejected", "worker_id", nodeID, "status", resp.Status)
 	}
 	// Close the response body to prevent network leaks
 	defer resp.Body.Close()

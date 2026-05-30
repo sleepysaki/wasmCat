@@ -9,6 +9,7 @@ import (
 	"net/http" // http server to listen for requests from the main process and respond with results
 	"os"
 	"path/filepath"
+	"wasmcat/internal/logging"
 	"wasmcat/internal/shared"
 )
 
@@ -23,7 +24,7 @@ func (s *WorkerServer) Handler() http.Handler {
 	mux.HandleFunc("/wasmcat/health", s.handleHealth)
 	mux.HandleFunc("/wasmcat/ready", s.handleReady)
 	mux.HandleFunc("/invoke", s.handleInvoke)
-	return mux
+	return logging.Middleware("worker", mux)
 }
 
 func (s *WorkerServer) handleHealth(w http.ResponseWriter, r *http.Request) {

@@ -4,8 +4,10 @@ import (
 	"context" // manage lifecycle, kill fnc after timeout to save resources
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/tetratelabs/wazero"
 )
@@ -46,6 +48,7 @@ func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL st
 	_, ok := e.cache[moduleName]
 	e.mu.RUnlock()
 	if ok {
+		slog.Info("module cache hit", "module_name", moduleName)
 		return nil
 	}
 
@@ -108,13 +111,22 @@ func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL st
 	e.mu.Lock()
 	if _, exists := e.cache[moduleName]; !exists {
 		e.cache[moduleName] = compiled
+		slog.Info("module compiled and cached", "module_name", moduleName, "module_url", moduleURL, "module_bytes", len(wasmBytes))
 	}
 	e.mu.Unlock()
 
 	return nil
 }
 
-func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL string, payload string, bearerToken string) (string, error) {
+func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL string, payload string, bearerToken string) (result string, err error) {
+	start := time.Now()
+	slog.Info("wasm execution started", "module_name", moduleName, "payload_bytes", len(payload))
+	defer func() {
+		if err != nil {
+			slog.Error("wasm execution failed", "module_name", moduleName, "duration_ms", time.Since(start).Milliseconds(), "error", err)
+		}
+	}()
+
 	// Reject big payloads before downloading or running anything.
 	// This protects both Go memory and the Wasm module's linear memory.
 	if int64(len(payload)) > e.limits.MaxPayloadBytes {
@@ -201,5 +213,6 @@ func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL s
 		return "", fmt.Errorf("read output for %s: %w", moduleName, err)
 	}
 
+	slog.Info("wasm execution completed", "module_name", moduleName, "duration_ms", time.Since(start).Milliseconds(), "output_bytes", len(output))
 	return output, nil
 }

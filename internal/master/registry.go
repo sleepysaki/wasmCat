@@ -2,6 +2,7 @@ package master
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 	"wasmcat/internal/shared"
@@ -30,7 +31,7 @@ func (r *Registry) RegisterWorker(worker shared.WorkerNode) {
 		worker.LastSeen = time.Now()
 	}
 	r.workers[worker.ID] = worker
-	fmt.Printf("Worker %s registered with IP %s\n", worker.ID, worker.IPAddress)
+	slog.Info("worker registered", "worker_id", worker.ID, "address", worker.IPAddress)
 }
 
 // Take the incoming worker, save to map with key=worker.ID
@@ -72,6 +73,7 @@ func (r *Registry) Cleanup() {
 	for id, node := range r.workers {
 		if time.Since(node.LastSeen) > 30*time.Second {
 			delete(r.workers, id)
+			slog.Info("worker removed after missed heartbeat", "worker_id", id, "last_seen", node.LastSeen)
 		}
 	}
 }

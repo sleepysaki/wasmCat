@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 	"wasmcat/internal/security"
 	"wasmcat/internal/shared"
 )
@@ -22,6 +24,7 @@ type Dispatcher struct {
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) (shared.ExecutionResponse, error) {
+	start := time.Now()
 	moduleRegistryURL := req.ModuleURL
 	if moduleRegistryURL == "" {
 		moduleRegistryURL = req.ModuleRegistryURL
@@ -56,8 +59,31 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) 
 	if err != nil {
 		return shared.ExecutionResponse{}, err
 	}
+	slog.Info("worker selected",
+		"module_name", req.ModuleName,
+		"worker_id", targetNode.ID,
+		"worker_address", targetNode.IPAddress,
+		"active_workers", len(workers),
+	)
 
-	return d.forwardToWorker(ctx, targetNode, req)
+	resp, err := d.forwardToWorker(ctx, targetNode, req)
+	if err != nil {
+		slog.Error("dispatch failed",
+			"module_name", req.ModuleName,
+			"worker_id", targetNode.ID,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"error", err,
+		)
+		return shared.ExecutionResponse{}, err
+	}
+
+	slog.Info("dispatch completed",
+		"module_name", req.ModuleName,
+		"worker_id", targetNode.ID,
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
+
+	return resp, nil
 }
 
 func (d *Dispatcher) forwardToWorker(ctx context.Context, node shared.WorkerNode, req shared.ExecutionRequest) (shared.ExecutionResponse, error) {
@@ -90,6 +116,7 @@ func (d *Dispatcher) forwardToWorker(ctx context.Context, node shared.WorkerNode
 		return shared.ExecutionResponse{}, err
 	}
 	defer resp.Body.Close()
+	slog.Info("worker response received", "worker_id", node.ID, "status", resp.StatusCode)
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))

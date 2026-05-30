@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"wasmcat/internal/logging"
 	"wasmcat/internal/shared"
 )
 
@@ -32,7 +33,7 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("/internal/register", g.handleRegister)
 	mux.HandleFunc("/internal/heartbeat", g.handleHeartbeat)
 	mux.HandleFunc("/api/v1/execute", g.handleExecute)
-	return mux
+	return logging.Middleware("master", mux)
 }
 
 func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
