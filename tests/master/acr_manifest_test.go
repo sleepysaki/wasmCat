@@ -1,4 +1,4 @@
-package master
+package master_test
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"wasmcat/internal/master"
 )
 
 func TestParseACRModuleReference(t *testing.T) {
@@ -23,7 +24,7 @@ func TestParseACRModuleReference(t *testing.T) {
 			wantRegistry:   "reg",
 			wantRepository: "team/echo",
 			wantReference:  "latest",
-			wantKind:       acrReferenceKindManifest,
+			wantKind:       master.ACRReferenceKindManifest,
 		},
 		{
 			name:           "manifest digest URL",
@@ -31,7 +32,7 @@ func TestParseACRModuleReference(t *testing.T) {
 			wantRegistry:   "reg",
 			wantRepository: "team/echo",
 			wantReference:  "sha256:abc",
-			wantKind:       acrReferenceKindManifest,
+			wantKind:       master.ACRReferenceKindManifest,
 		},
 		{
 			name:           "blob URL",
@@ -39,7 +40,7 @@ func TestParseACRModuleReference(t *testing.T) {
 			wantRegistry:   "reg",
 			wantRepository: "team/echo",
 			wantReference:  "sha256:abc",
-			wantKind:       acrReferenceKindBlob,
+			wantKind:       master.ACRReferenceKindBlob,
 		},
 		{
 			name:           "repository style URL",
@@ -47,15 +48,15 @@ func TestParseACRModuleReference(t *testing.T) {
 			wantRegistry:   "reg",
 			wantRepository: "team/echo",
 			wantReference:  "",
-			wantKind:       acrReferenceKindRepository,
+			wantKind:       master.ACRReferenceKindRepository,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseACRModuleReference(tt.moduleURL)
+			got, err := master.ParseACRModuleReference(tt.moduleURL)
 			if err != nil {
-				t.Fatalf("parseACRModuleReference returned error: %v", err)
+				t.Fatalf("ParseACRModuleReference returned error: %v", err)
 			}
 			if got.RegistryName != tt.wantRegistry {
 				t.Fatalf("expected registry %q, got %q", tt.wantRegistry, got.RegistryName)
@@ -101,9 +102,9 @@ func TestFetchACRManifestUsesBearerTokenAndAcceptHeader(t *testing.T) {
 	}))
 	defer server.Close()
 
-	manifest, err := fetchACRManifest(ctx, server.URL, "test-token")
+	manifest, err := master.FetchACRManifest(ctx, server.URL, "test-token")
 	if err != nil {
-		t.Fatalf("fetchACRManifest returned error: %v", err)
+		t.Fatalf("FetchACRManifest returned error: %v", err)
 	}
 	if len(manifest.Layers) != 1 {
 		t.Fatalf("expected one layer, got %d", len(manifest.Layers))
@@ -116,20 +117,20 @@ func TestFetchACRManifestUsesBearerTokenAndAcceptHeader(t *testing.T) {
 func TestSelectWASMLayer(t *testing.T) {
 	tests := []struct {
 		name       string
-		manifest   ociManifest
+		manifest   master.OCIManifest
 		wantDigest string
 		wantErr    bool
 	}{
 		{
 			name: "single layer is selected",
-			manifest: ociManifest{Layers: []ociLayer{
+			manifest: master.OCIManifest{Layers: []master.OCILayer{
 				{MediaType: "application/octet-stream", Digest: "sha256:single"},
 			}},
 			wantDigest: "sha256:single",
 		},
 		{
 			name: "known wasm layer is selected from many",
-			manifest: ociManifest{Layers: []ociLayer{
+			manifest: master.OCIManifest{Layers: []master.OCILayer{
 				{MediaType: "application/octet-stream", Digest: "sha256:other"},
 				{MediaType: "application/wasm", Digest: "sha256:wasm"},
 			}},
@@ -137,12 +138,12 @@ func TestSelectWASMLayer(t *testing.T) {
 		},
 		{
 			name:     "no layers is rejected",
-			manifest: ociManifest{},
+			manifest: master.OCIManifest{},
 			wantErr:  true,
 		},
 		{
 			name: "multiple unknown layers are rejected",
-			manifest: ociManifest{Layers: []ociLayer{
+			manifest: master.OCIManifest{Layers: []master.OCILayer{
 				{MediaType: "application/octet-stream", Digest: "sha256:one"},
 				{MediaType: "application/octet-stream", Digest: "sha256:two"},
 			}},
@@ -152,7 +153,7 @@ func TestSelectWASMLayer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			layer, err := selectWASMLayer(tt.manifest)
+			layer, err := master.SelectWASMLayer(tt.manifest)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -160,7 +161,7 @@ func TestSelectWASMLayer(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("selectWASMLayer returned error: %v", err)
+				t.Fatalf("SelectWASMLayer returned error: %v", err)
 			}
 			if layer.Digest != tt.wantDigest {
 				t.Fatalf("expected digest %q, got %q", tt.wantDigest, layer.Digest)
@@ -170,61 +171,16 @@ func TestSelectWASMLayer(t *testing.T) {
 }
 
 func TestBuildACRBlobURL(t *testing.T) {
-	got, err := buildACRBlobURL(
+	got, err := master.BuildACRBlobURL(
 		"https://reg.azurecr.io/v2/team/echo/manifests/latest?ignored=true",
 		"team/echo",
 		"sha256:abc",
 	)
 	if err != nil {
-		t.Fatalf("buildACRBlobURL returned error: %v", err)
+		t.Fatalf("BuildACRBlobURL returned error: %v", err)
 	}
 
 	want := "https://reg.azurecr.io/v2/team/echo/blobs/sha256:abc"
-	if got != want {
-		t.Fatalf("expected %q, got %q", want, got)
-	}
-}
-
-func TestResolveACRModuleURLResolvesManifestToBlob(t *testing.T) {
-	ctx := context.Background()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{
-			"schemaVersion": 2,
-			"layers": [
-				{
-					"mediaType": "application/wasm",
-					"digest": "sha256:resolved",
-					"size": 99
-				}
-			]
-		}`))
-	}))
-	defer server.Close()
-
-	ref := acrReference{
-		RegistryName:   "reg",
-		RepositoryName: "team/echo",
-		Reference:      "latest",
-		Kind:           acrReferenceKindManifest,
-	}
-
-	// Use the test server for the manifest fetch, then still build the final
-	// worker URL from the ACR-looking manifest URL.
-	manifest, err := fetchACRManifest(ctx, server.URL, "token")
-	if err != nil {
-		t.Fatalf("fetchACRManifest returned error: %v", err)
-	}
-	layer, err := selectWASMLayer(manifest)
-	if err != nil {
-		t.Fatalf("selectWASMLayer returned error: %v", err)
-	}
-	got, err := buildACRBlobURL("https://reg.azurecr.io/v2/team/echo/manifests/latest", ref.RepositoryName, layer.Digest)
-	if err != nil {
-		t.Fatalf("buildACRBlobURL returned error: %v", err)
-	}
-
-	want := "https://reg.azurecr.io/v2/team/echo/blobs/sha256:resolved"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}

@@ -18,6 +18,12 @@ type WorkerServer struct {
 	NodeID string
 }
 
+func (s *WorkerServer) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/invoke", s.handleInvoke)
+	return mux
+}
+
 // Logic handler
 func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	// Limit the HTTP body before JSON decoding.
@@ -52,9 +58,6 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WorkerServer) Start(port string) error {
-	// run handleInvoke when getting a request to /invoke endpoint
-	http.HandleFunc("/invoke", s.handleInvoke)
-
 	caPEM, err := os.ReadFile(filepath.Join("./certs", "ca.crt"))
 	if err != nil {
 		return fmt.Errorf("read ca cert: %w", err)
@@ -72,6 +75,7 @@ func (s *WorkerServer) Start(port string) error {
 
 	server := &http.Server{
 		Addr:      ":" + port,
+		Handler:   s.Handler(),
 		TLSConfig: tlsConfig,
 	}
 

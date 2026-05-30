@@ -1,0 +1,69 @@
+package config_test
+
+import (
+	"testing"
+	"time"
+	"wasmcat/internal/config"
+)
+
+func TestLoadWorkerReadsEnvironment(t *testing.T) {
+	t.Setenv("WORKER_ID", "worker-test")
+	t.Setenv("WORKER_PORT", "9001")
+	t.Setenv("MASTER_URL", "https://master.test:9443")
+	t.Setenv("WORKER_ADVERTISE_ADDRESS", "worker.test:9001")
+	t.Setenv("HEARTBEAT_INTERVAL", "2s")
+	t.Setenv("EXECUTION_TIMEOUT", "3s")
+	t.Setenv("MODULE_FETCH_TIMEOUT", "4s")
+	t.Setenv("MAX_MODULE_BYTES", "100")
+	t.Setenv("MAX_PAYLOAD_BYTES", "50")
+	t.Setenv("MAX_OUTPUT_BYTES", "25")
+	t.Setenv("MAX_CONCURRENT_EXECS", "2")
+
+	cfg, err := config.LoadWorker()
+	if err != nil {
+		t.Fatalf("LoadWorker returned error: %v", err)
+	}
+
+	if cfg.NodeID != "worker-test" {
+		t.Fatalf("expected worker-test node ID, got %q", cfg.NodeID)
+	}
+	if cfg.Port != "9001" {
+		t.Fatalf("expected port 9001, got %q", cfg.Port)
+	}
+	if cfg.MasterURL != "https://master.test:9443" {
+		t.Fatalf("expected configured master URL, got %q", cfg.MasterURL)
+	}
+	if cfg.AdvertiseAddress != "worker.test:9001" {
+		t.Fatalf("expected configured advertise address, got %q", cfg.AdvertiseAddress)
+	}
+	if cfg.HeartbeatInterval != 2*time.Second {
+		t.Fatalf("expected heartbeat interval 2s, got %s", cfg.HeartbeatInterval)
+	}
+	if cfg.Limits.ExecutionTimeout != 3*time.Second {
+		t.Fatalf("expected execution timeout 3s, got %s", cfg.Limits.ExecutionTimeout)
+	}
+	if cfg.Limits.ModuleFetchTimeout != 4*time.Second {
+		t.Fatalf("expected module fetch timeout 4s, got %s", cfg.Limits.ModuleFetchTimeout)
+	}
+	if cfg.Limits.MaxModuleBytes != 100 {
+		t.Fatalf("expected max module bytes 100, got %d", cfg.Limits.MaxModuleBytes)
+	}
+	if cfg.Limits.MaxPayloadBytes != 50 {
+		t.Fatalf("expected max payload bytes 50, got %d", cfg.Limits.MaxPayloadBytes)
+	}
+	if cfg.Limits.MaxOutputBytes != 25 {
+		t.Fatalf("expected max output bytes 25, got %d", cfg.Limits.MaxOutputBytes)
+	}
+	if cfg.Limits.MaxConcurrentExecs != 2 {
+		t.Fatalf("expected max concurrent execs 2, got %d", cfg.Limits.MaxConcurrentExecs)
+	}
+}
+
+func TestLoadMasterRejectsInvalidDuration(t *testing.T) {
+	t.Setenv("CLEANUP_INTERVAL", "not-a-duration")
+
+	_, err := config.LoadMaster()
+	if err == nil {
+		t.Fatal("expected invalid duration error")
+	}
+}

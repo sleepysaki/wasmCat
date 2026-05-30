@@ -17,7 +17,11 @@ import (
 
 // StartTelemetry begins sending heartbeats to the Master node.
 // masterURL should be something like "http://localhost:8080"
-func StartTelemetry(ctx context.Context, masterURL string, nodeID string, workerAddress string) {
+func StartTelemetry(ctx context.Context, masterURL string, nodeID string, workerAddress string, interval time.Duration) {
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+
 	client, err := newMTLSClient(nodeID)
 	if err != nil {
 		log.Printf("telemetry client init error: %v\n", err)
@@ -25,9 +29,9 @@ func StartTelemetry(ctx context.Context, masterURL string, nodeID string, worker
 	}
 
 	registerWorker(client, masterURL, nodeID, workerAddress)
-	// Create a ticker that fires every 5 seconds
+	// Create a ticker that fires on the configured heartbeat interval
 	// time.Sleep() in a loop is not used because it can block thread, no easy cancellation, and less accurate
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {

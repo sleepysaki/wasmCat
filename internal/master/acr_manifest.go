@@ -13,6 +13,10 @@ const (
 	acrReferenceKindRepository = "repository"
 	acrReferenceKindManifest   = "manifest"
 	acrReferenceKindBlob       = "blob"
+
+	ACRReferenceKindRepository = acrReferenceKindRepository
+	ACRReferenceKindManifest   = acrReferenceKindManifest
+	ACRReferenceKindBlob       = acrReferenceKindBlob
 )
 
 type acrReference struct {
@@ -35,6 +39,10 @@ type ociLayer struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
+type ACRReference = acrReference
+type OCIManifest = ociManifest
+type OCILayer = ociLayer
+
 func isACRURL(moduleURL string) bool {
 	parsedURL, err := url.Parse(moduleURL)
 	if err != nil {
@@ -42,6 +50,10 @@ func isACRURL(moduleURL string) bool {
 	}
 
 	return strings.HasSuffix(parsedURL.Hostname(), ".azurecr.io")
+}
+
+func ParseACRModuleReference(moduleRegistryURL string) (ACRReference, error) {
+	return parseACRModuleReference(moduleRegistryURL)
 }
 
 func parseACRModuleReference(moduleRegistryURL string) (acrReference, error) {
@@ -143,6 +155,10 @@ func resolveACRModuleURL(ctx context.Context, moduleRegistryURL string, token st
 	return buildACRBlobURL(moduleRegistryURL, ref.RepositoryName, layer.Digest)
 }
 
+func FetchACRManifest(ctx context.Context, manifestURL string, token string) (OCIManifest, error) {
+	return fetchACRManifest(ctx, manifestURL, token)
+}
+
 func fetchACRManifest(ctx context.Context, manifestURL string, token string) (ociManifest, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
 	if err != nil {
@@ -176,6 +192,10 @@ func fetchACRManifest(ctx context.Context, manifestURL string, token string) (oc
 	return manifest, nil
 }
 
+func SelectWASMLayer(manifest OCIManifest) (OCILayer, error) {
+	return selectWASMLayer(manifest)
+}
+
 func selectWASMLayer(manifest ociManifest) (ociLayer, error) {
 	if len(manifest.Layers) == 0 {
 		return ociLayer{}, fmt.Errorf("acr manifest has no layers")
@@ -202,6 +222,10 @@ func isWASMLayerMediaType(mediaType string) bool {
 	default:
 		return false
 	}
+}
+
+func BuildACRBlobURL(originalURL string, repositoryName string, digest string) (string, error) {
+	return buildACRBlobURL(originalURL, repositoryName, digest)
 }
 
 func buildACRBlobURL(originalURL string, repositoryName string, digest string) (string, error) {

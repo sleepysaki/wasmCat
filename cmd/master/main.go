@@ -3,12 +3,18 @@ package main
 import (
 	"log"
 	"time"
+	"wasmcat/internal/config"
 	"wasmcat/internal/master"
 	"wasmcat/internal/security"
 )
 
 func main() {
 	log.Println("Initializing Control plane...")
+
+	cfg, err := config.LoadMaster()
+	if err != nil {
+		log.Fatalf("failed to load master config: %v", err)
+	}
 
 	// Dependency Injection & Initialization
 
@@ -35,7 +41,7 @@ func main() {
 	}
 
 	// Background Processes
-	if err := security.GenerateCAAndCerts("worker-vn-01"); err != nil {
+	if err := security.GenerateCAAndCerts(cfg.WorkerIDForCert); err != nil {
 		log.Fatalf("failed to generate local certs: %v", err)
 	}
 
@@ -43,9 +49,9 @@ func main() {
 	// Run completely independently of the web server
 	// Every 15 seconds, it scrubs the Registry for dead edge nodes
 	go func() {
-		log.Println("Background Reaper started (15s interval).")
+		log.Printf("Background Reaper started (%s interval).", cfg.CleanupInterval)
 		for {
-			time.Sleep(15 * time.Second)
+			time.Sleep(cfg.CleanupInterval)
 			reg.Cleanup()
 		}
 	}()
@@ -54,10 +60,9 @@ func main() {
 
 	// Turn on the API Server
 	// This is a blocking call. The program will stay on this line forever unless the server crashes.
-	port := "7270"
-	log.Printf("Master Gateway is LIVE on port %s.\n", port)
+	log.Printf("Master Gateway is LIVE on port %s.\n", cfg.Port)
 
-	err := gateway.Start(port)
+	err = gateway.Start(cfg.Port)
 	if err != nil {
 		log.Fatalf("CRITICAL: Master Gateway crashed: %v", err)
 	}

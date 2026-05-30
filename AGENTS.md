@@ -20,7 +20,7 @@ Use standard Go formatting: run `gofmt` on changed `.go` files before committing
 
 ## Testing Guidelines
 
-Place tests next to the package they cover using Go's `*_test.go` convention. Use table-driven tests for scheduler, registry, dispatcher, and security behavior where inputs and expected outputs are clear. Keep WASM fixtures in `test_modules/` when tests need real module files. Always run `go test ./...` before opening a PR.
+Keep tests in the separate `tests/` tree, grouped by area such as `tests/worker` and `tests/master`. Use Go's `*_test.go` convention and prefer external test packages that exercise exported APIs. Keep WASM fixtures in `test_modules/` when tests need real module files. Always run `go test ./...` before opening a PR.
 
 ## Commit & Pull Request Guidelines
 
