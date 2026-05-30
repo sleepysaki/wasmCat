@@ -15,13 +15,27 @@ type WasmEngine struct {
 	runtime wazero.Runtime
 	cache   map[string]wazero.CompiledModule
 	mu      sync.RWMutex
+	limits  Limits
+	sem     chan struct{}
 }
 
 func NewWasmEngine(ctx context.Context) *WasmEngine {
+	return NewWasmEngineWithLimits(ctx, DefaultLimits)
+}
+
+func NewWasmEngineWithLimits(ctx context.Context, limits Limits) *WasmEngine {
+	limits = normalizeLimits(limits)
+
 	return &WasmEngine{
-		runtime: wazero.NewRuntime(ctx),
+		runtime: wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true)),
 		cache:   make(map[string]wazero.CompiledModule),
+		limits:  limits,
+		sem:     make(chan struct{}, limits.MaxConcurrentExecs),
 	}
+}
+
+func (e *WasmEngine) Limits() Limits {
+	return e.limits
 }
 
 func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL string, bearerToken string) error {
@@ -41,9 +55,14 @@ func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL st
 		return fmt.Errorf("module %s has no module URL", moduleName)
 	}
 
+	// Module fetching has its own timeout.
+	// This keeps slow storage or a stuck registry from holding a worker request forever.
+	fetchCtx, cancel := context.WithTimeout(ctx, e.limits.ModuleFetchTimeout)
+	defer cancel()
+
 	// Tie the download request to the execution context.
 	// If the caller cancels the request or adds a timeout later, the download stops too.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, moduleURL, nil)
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, moduleURL, nil)
 	if err != nil {
 		return fmt.Errorf("create request for %s: %w", moduleURL, err)
 	}
@@ -65,16 +84,20 @@ func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL st
 		return fmt.Errorf("download %s: unexpected status %s", moduleURL, resp.Status)
 	}
 
-	// Read the module into memory so wazero can compile it.
-	// A production worker should cap this reader so one huge module cannot exhaust RAM.
-	wasmBytes, err := io.ReadAll(resp.Body)
+	// Read only up to the configured module size plus one byte.
+	// The extra byte tells us the module is too large without needing to read the whole body.
+	limitedBody := io.LimitReader(resp.Body, e.limits.MaxModuleBytes+1)
+	wasmBytes, err := io.ReadAll(limitedBody)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", moduleURL, err)
+	}
+	if int64(len(wasmBytes)) > e.limits.MaxModuleBytes {
+		return fmt.Errorf("module %s exceeds max size of %d bytes", moduleName, e.limits.MaxModuleBytes)
 	}
 
 	// Compile once and cache the compiled form.
 	// Compilation is more expensive than instantiation, so the cache avoids doing it for every request.
-	compiled, err := e.runtime.CompileModule(ctx, wasmBytes)
+	compiled, err := e.runtime.CompileModule(fetchCtx, wasmBytes)
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", moduleName, err)
 	}
@@ -92,9 +115,31 @@ func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL st
 }
 
 func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL string, payload string, bearerToken string) (string, error) {
+	// Reject big payloads before downloading or running anything.
+	// This protects both Go memory and the Wasm module's linear memory.
+	if int64(len(payload)) > e.limits.MaxPayloadBytes {
+		return "", fmt.Errorf("payload exceeds max size of %d bytes", e.limits.MaxPayloadBytes)
+	}
+
+	// This is the worker's local backpressure point.
+	// If every execution slot is busy, reject quickly instead of queueing unlimited work.
+	select {
+	case e.sem <- struct{}{}:
+		defer func() { <-e.sem }()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+		return "", fmt.Errorf("worker is at max execution capacity of %d", e.limits.MaxConcurrentExecs)
+	}
+
+	// The execution timeout covers the full worker-side execution path:
+	// fetch if needed, instantiate, memory write, run, memory read, and cleanup.
+	execCtx, cancel := context.WithTimeout(ctx, e.limits.ExecutionTimeout)
+	defer cancel()
+
 	// Make sure the module is compiled and available.
 	// FetchAndCache downloads only on the first request for this module name.
-	if err := e.FetchAndCache(ctx, moduleName, moduleURL, bearerToken); err != nil {
+	if err := e.FetchAndCache(execCtx, moduleName, moduleURL, bearerToken); err != nil {
 		return "", err
 	}
 
@@ -109,15 +154,15 @@ func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL s
 
 	// Instantiate a fresh module for this execution.
 	// Each request gets its own instance and its own linear memory, so requests do not share data.
-	mod, err := e.runtime.InstantiateModule(ctx, compiled, wazero.NewModuleConfig())
+	mod, err := e.runtime.InstantiateModule(execCtx, compiled, wazero.NewModuleConfig())
 	if err != nil {
 		return "", fmt.Errorf("instantiate module %s: %w", moduleName, err)
 	}
-	defer mod.Close(ctx)
+	defer mod.Close(execCtx)
 
 	// Step 4: copy the input string into the module's linear memory.
 	// Go memory and Wasm memory are separate, so we cannot pass a Go string directly.
-	inputPtr, err := WriteString(ctx, mod, payload)
+	inputPtr, err := WriteString(execCtx, mod, payload)
 	if err != nil {
 		return "", fmt.Errorf("write input for %s: %w", moduleName, err)
 	}
@@ -133,7 +178,7 @@ func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL s
 
 	// Call the Wasm function.
 	// Wazero uses uint64 values for all Wasm parameters/results at the Go API boundary.
-	results, err := run.Call(ctx, uint64(inputPtr), uint64(len(payload)))
+	results, err := run.Call(execCtx, uint64(inputPtr), uint64(len(payload)))
 	if err != nil {
 		return "", fmt.Errorf("run module %s: %w", moduleName, err)
 	}
@@ -146,6 +191,9 @@ func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL s
 	packedOutput := results[0]
 	outputPtr := uint32(packedOutput >> 32)
 	outputLen := uint32(packedOutput)
+	if outputLen > e.limits.MaxOutputBytes {
+		return "", fmt.Errorf("output exceeds max size of %d bytes", e.limits.MaxOutputBytes)
+	}
 
 	// Read the output bytes back out of Wasm memory and return them as a Go string.
 	output, err := ReadString(mod, outputPtr, outputLen)

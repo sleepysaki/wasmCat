@@ -20,6 +20,10 @@ type WorkerServer struct {
 
 // Logic handler
 func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
+	// Limit the HTTP body before JSON decoding.
+	// The payload limit covers the user data, and the extra bytes leave room for JSON field names and module metadata.
+	r.Body = http.MaxBytesReader(w, r.Body, s.Engine.Limits().MaxPayloadBytes+4096)
+
 	// create a variable of type ExecutionRequest and decode the JSON body into it
 	var req shared.ExecutionRequest
 	// tell the decoder to read from the request body and decode into the req struct
