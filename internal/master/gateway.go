@@ -27,10 +27,33 @@ func NewGateway(reg *Registry) *Gateway {
 
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", g.handleHealth)
+	mux.HandleFunc("/readyz", g.handleReady)
 	mux.HandleFunc("/internal/register", g.handleRegister)
 	mux.HandleFunc("/internal/heartbeat", g.handleHeartbeat)
 	mux.HandleFunc("/api/v1/execute", g.handleExecute)
 	return mux
+}
+
+func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
+	shared.WriteJSON(w, http.StatusOK, shared.HealthResponse{
+		Status: "ok",
+		Role:   "master",
+	})
+}
+
+func (g *Gateway) handleReady(w http.ResponseWriter, r *http.Request) {
+	// Readiness means the gateway has the dependencies needed to accept and dispatch work.
+	// A live process with a nil registry or dispatcher should not receive traffic yet.
+	if g.Registry == nil || g.Dispatcher == nil || g.Dispatcher.Scheduler == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "not_ready", fmt.Errorf("master dependencies are not initialized"))
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, shared.HealthResponse{
+		Status: "ready",
+		Role:   "master",
+	})
 }
 
 func (g *Gateway) handleRegister(w http.ResponseWriter, r *http.Request) {

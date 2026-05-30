@@ -20,8 +20,33 @@ type WorkerServer struct {
 
 func (s *WorkerServer) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/readyz", s.handleReady)
 	mux.HandleFunc("/invoke", s.handleInvoke)
 	return mux
+}
+
+func (s *WorkerServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+	shared.WriteJSON(w, http.StatusOK, shared.HealthResponse{
+		Status: "ok",
+		NodeID: s.NodeID,
+		Role:   "worker",
+	})
+}
+
+func (s *WorkerServer) handleReady(w http.ResponseWriter, r *http.Request) {
+	// Readiness means the worker has the engine dependency needed to execute modules.
+	// This does not prove a specific module URL is reachable; that remains per-request work.
+	if s.Engine == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "not_ready", fmt.Errorf("worker engine is not initialized"))
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, shared.HealthResponse{
+		Status: "ready",
+		NodeID: s.NodeID,
+		Role:   "worker",
+	})
 }
 
 // Logic handler

@@ -84,3 +84,9 @@ type ErrorResponse struct {
 	Code    string `json:"code,omitempty"`
 	Details string `json:"details,omitempty"`
 }
+
+type HealthResponse struct {
+	Status string `json:"status"`
+	NodeID string `json:"node_id,omitempty"`
+	Role   string `json:"role,omitempty"`
+}
