@@ -10,19 +10,22 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
+	"wasmcat/internal/security"
 	"wasmcat/internal/shared"
 )
 
 // StartTelemetry begins sending heartbeats to the Master node.
 // masterURL should be something like "http://localhost:8080"
-func StartTelemetry(ctx context.Context, masterURL string, nodeID string, workerAddress string, interval time.Duration) {
+func StartTelemetry(ctx context.Context, masterURL string, nodeID string, workerAddress string, interval time.Duration, certDir string) {
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
+	if certDir == "" {
+		certDir = "./certs"
+	}
 
-	client, err := newMTLSClient(nodeID)
+	client, err := newMTLSClient(certDir, nodeID)
 	if err != nil {
 		slog.Error("telemetry client init error", "worker_id", nodeID, "error", err)
 		return
@@ -48,10 +51,10 @@ func StartTelemetry(ctx context.Context, masterURL string, nodeID string, worker
 	}
 }
 
-func newMTLSClient(nodeID string) (*http.Client, error) {
-	certFile := filepath.Join("./certs", fmt.Sprintf("worker-%s.crt", nodeID))
-	keyFile := filepath.Join("./certs", fmt.Sprintf("worker-%s.key", nodeID))
-	caFile := filepath.Join("./certs", "ca.crt")
+func newMTLSClient(certDir string, nodeID string) (*http.Client, error) {
+	certFile := security.WorkerCertPath(certDir, nodeID)
+	keyFile := security.WorkerKeyPath(certDir, nodeID)
+	caFile := security.CACertPath(certDir)
 
 	clientCert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {

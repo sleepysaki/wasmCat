@@ -11,6 +11,7 @@ func TestLoadWorkerReadsEnvironment(t *testing.T) {
 	t.Setenv("WORKER_PORT", "9001")
 	t.Setenv("MASTER_URL", "https://master.test:9443")
 	t.Setenv("WORKER_ADVERTISE_ADDRESS", "worker.test:9001")
+	t.Setenv("CERT_DIR", "C:\\wasmcat\\certs")
 	t.Setenv("HEARTBEAT_INTERVAL", "2s")
 	t.Setenv("EXECUTION_TIMEOUT", "3s")
 	t.Setenv("MODULE_FETCH_TIMEOUT", "4s")
@@ -35,6 +36,9 @@ func TestLoadWorkerReadsEnvironment(t *testing.T) {
 	}
 	if cfg.AdvertiseAddress != "worker.test:9001" {
 		t.Fatalf("expected configured advertise address, got %q", cfg.AdvertiseAddress)
+	}
+	if cfg.CertDir != "C:\\wasmcat\\certs" {
+		t.Fatalf("expected configured cert dir, got %q", cfg.CertDir)
 	}
 	if cfg.HeartbeatInterval != 2*time.Second {
 		t.Fatalf("expected heartbeat interval 2s, got %s", cfg.HeartbeatInterval)
@@ -65,5 +69,35 @@ func TestLoadMasterRejectsInvalidDuration(t *testing.T) {
 	_, err := config.LoadMaster()
 	if err == nil {
 		t.Fatal("expected invalid duration error")
+	}
+}
+
+func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
+	t.Setenv("CERT_DIR", "/etc/wasmcat/certs")
+	t.Setenv("AUTO_GENERATE_CERTS", "false")
+	t.Setenv("DEV_WORKER_ID", "worker-prod-01")
+
+	cfg, err := config.LoadMaster()
+	if err != nil {
+		t.Fatalf("LoadMaster returned error: %v", err)
+	}
+
+	if cfg.CertDir != "/etc/wasmcat/certs" {
+		t.Fatalf("expected cert dir /etc/wasmcat/certs, got %q", cfg.CertDir)
+	}
+	if cfg.AutoGenerateCerts {
+		t.Fatal("expected auto certificate generation to be disabled")
+	}
+	if cfg.WorkerIDForCert != "worker-prod-01" {
+		t.Fatalf("expected worker-prod-01, got %q", cfg.WorkerIDForCert)
+	}
+}
+
+func TestLoadMasterRejectsInvalidAutoGenerateCerts(t *testing.T) {
+	t.Setenv("AUTO_GENERATE_CERTS", "maybe")
+
+	_, err := config.LoadMaster()
+	if err == nil {
+		t.Fatal("expected invalid boolean error")
 	}
 }

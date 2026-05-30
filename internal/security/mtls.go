@@ -16,11 +16,12 @@ import (
 	"time"
 )
 
-const certDir = "./certs"
-
 // GenerateCAAndCerts creates a local CA and leaf certificates for the master
 // and worker so the cluster can run mTLS locally without external tooling.
-func GenerateCAAndCerts(workerID string) error {
+func GenerateCAAndCerts(certDir string, workerID string) error {
+	if certDir == "" {
+		return fmt.Errorf("certDir is required")
+	}
 	if workerID == "" {
 		return fmt.Errorf("workerID is required")
 	}
@@ -71,6 +72,26 @@ func GenerateCAAndCerts(workerID string) error {
 	}
 
 	return nil
+}
+
+func CACertPath(certDir string) string {
+	return filepath.Join(certDir, "ca.crt")
+}
+
+func MasterCertPath(certDir string) string {
+	return filepath.Join(certDir, "master.crt")
+}
+
+func MasterKeyPath(certDir string) string {
+	return filepath.Join(certDir, "master.key")
+}
+
+func WorkerCertPath(certDir string, workerID string) string {
+	return filepath.Join(certDir, fmt.Sprintf("worker-%s.crt", workerID))
+}
+
+func WorkerKeyPath(certDir string, workerID string) string {
+	return filepath.Join(certDir, fmt.Sprintf("worker-%s.key", workerID))
 }
 
 func generateLeafCert(certPath string, keyPath string, caCert *x509.Certificate, caKey *rsa.PrivateKey, commonName string, addLocalSANs bool) error {

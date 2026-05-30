@@ -17,9 +17,11 @@ type Limits struct {
 }
 
 type MasterConfig struct {
-	Port            string
-	WorkerIDForCert string
-	CleanupInterval time.Duration
+	Port              string
+	CertDir           string
+	AutoGenerateCerts bool
+	WorkerIDForCert   string
+	CleanupInterval   time.Duration
 }
 
 type WorkerConfig struct {
@@ -27,6 +29,7 @@ type WorkerConfig struct {
 	NodeID            string
 	MasterURL         string
 	AdvertiseAddress  string
+	CertDir           string
 	HeartbeatInterval time.Duration
 	Limits            Limits
 }
@@ -36,11 +39,17 @@ func LoadMaster() (MasterConfig, error) {
 	if err != nil {
 		return MasterConfig{}, err
 	}
+	autoGenerateCerts, err := boolEnv("AUTO_GENERATE_CERTS", true)
+	if err != nil {
+		return MasterConfig{}, err
+	}
 
 	cfg := MasterConfig{
-		Port:            stringEnv("MASTER_PORT", "7270"),
-		WorkerIDForCert: stringEnv("DEV_WORKER_ID", "worker-vn-01"),
-		CleanupInterval: cleanupInterval,
+		Port:              stringEnv("MASTER_PORT", "7270"),
+		CertDir:           stringEnv("CERT_DIR", "./certs"),
+		AutoGenerateCerts: autoGenerateCerts,
+		WorkerIDForCert:   stringEnv("DEV_WORKER_ID", "worker-vn-01"),
+		CleanupInterval:   cleanupInterval,
 	}
 
 	return cfg, nil
@@ -65,6 +74,7 @@ func LoadWorker() (WorkerConfig, error) {
 		NodeID:            nodeID,
 		MasterURL:         stringEnv("MASTER_URL", "https://localhost:7270"),
 		AdvertiseAddress:  stringEnv("WORKER_ADVERTISE_ADDRESS", "localhost:"+port),
+		CertDir:           stringEnv("CERT_DIR", "./certs"),
 		HeartbeatInterval: heartbeatInterval,
 		Limits:            limits,
 	}
@@ -134,6 +144,20 @@ func durationEnv(name string, fallback time.Duration) (time.Duration, error) {
 	parsed, err := time.ParseDuration(value)
 	if err != nil {
 		return 0, fmt.Errorf("parse %s duration: %w", name, err)
+	}
+
+	return parsed, nil
+}
+
+func boolEnv(name string, fallback bool) (bool, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback, nil
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("parse %s boolean: %w", name, err)
 	}
 
 	return parsed, nil

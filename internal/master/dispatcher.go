@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 	"wasmcat/internal/security"
@@ -21,6 +20,7 @@ type Dispatcher struct {
 	Registry  *Registry
 	Scheduler *Scheduler
 	Client    *http.Client
+	CertDir   string
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) (shared.ExecutionResponse, error) {
@@ -98,7 +98,11 @@ func (d *Dispatcher) forwardToWorker(ctx context.Context, node shared.WorkerNode
 
 	client := d.Client
 	if client == nil {
-		client, err = security.NewMTLSHTTPClient(filepath.Join("./certs", "master.crt"), filepath.Join("./certs", "master.key"), filepath.Join("./certs", "ca.crt"))
+		certDir := d.CertDir
+		if certDir == "" {
+			certDir = "./certs"
+		}
+		client, err = security.NewMTLSHTTPClient(security.MasterCertPath(certDir), security.MasterKeyPath(certDir), security.CACertPath(certDir))
 		if err != nil {
 			return shared.ExecutionResponse{}, err
 		}

@@ -41,6 +41,7 @@ func main() {
 	dispatch := &master.Dispatcher{
 		Registry:  reg,
 		Scheduler: sched,
+		CertDir:   cfg.CertDir,
 	}
 	slog.Info("execution dispatcher initialized")
 
@@ -48,12 +49,18 @@ func main() {
 	gateway := &master.Gateway{
 		Registry:   reg,
 		Dispatcher: dispatch,
+		CertDir:    cfg.CertDir,
 	}
 
 	// Background Processes
-	if err := security.GenerateCAAndCerts(cfg.WorkerIDForCert); err != nil {
-		slog.Error("failed to generate local certs", "error", err)
-		return
+	if cfg.AutoGenerateCerts {
+		if err := security.GenerateCAAndCerts(cfg.CertDir, cfg.WorkerIDForCert); err != nil {
+			slog.Error("failed to generate local certs", "cert_dir", cfg.CertDir, "error", err)
+			return
+		}
+		slog.Info("local certificates generated", "cert_dir", cfg.CertDir, "worker_id", cfg.WorkerIDForCert)
+	} else {
+		slog.Info("automatic certificate generation disabled", "cert_dir", cfg.CertDir)
 	}
 
 	// Start the background garbage collection

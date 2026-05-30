@@ -9,9 +9,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 	"wasmcat/internal/logging"
+	"wasmcat/internal/security"
 	"wasmcat/internal/shared"
 )
 
@@ -20,6 +20,7 @@ import (
 type Gateway struct {
 	Registry   *Registry
 	Dispatcher *Dispatcher
+	CertDir    string
 }
 
 // Constructor
@@ -100,7 +101,12 @@ func (g *Gateway) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 // Start the HTTP server and set up the routes for worker registration and heartbeat
 func (g *Gateway) Start(ctx context.Context, port string) error {
-	caPEM, err := os.ReadFile(filepath.Join("./certs", "ca.crt"))
+	certDir := g.CertDir
+	if certDir == "" {
+		certDir = "./certs"
+	}
+
+	caPEM, err := os.ReadFile(security.CACertPath(certDir))
 	if err != nil {
 		return fmt.Errorf("read ca cert: %w", err)
 	}
@@ -123,7 +129,7 @@ func (g *Gateway) Start(ctx context.Context, port string) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- server.ListenAndServeTLS(filepath.Join("./certs", "master.crt"), filepath.Join("./certs", "master.key"))
+		errCh <- server.ListenAndServeTLS(security.MasterCertPath(certDir), security.MasterKeyPath(certDir))
 	}()
 
 	select {

@@ -35,13 +35,14 @@ func main() {
 	})
 
 	server := &worker.WorkerServer{
-		Engine: engine,
-		NodeID: cfg.NodeID,
+		Engine:  engine,
+		NodeID:  cfg.NodeID,
+		CertDir: cfg.CertDir,
 	}
 
 	// This runs in the background and pings the Master every 5 seconds
 	slog.Info("starting telemetry pulse", "master_url", cfg.MasterURL, "worker_id", cfg.NodeID, "interval", cfg.HeartbeatInterval.String())
-	go worker.StartTelemetry(ctx, cfg.MasterURL, cfg.NodeID, cfg.AdvertiseAddress, cfg.HeartbeatInterval)
+	go worker.StartTelemetry(ctx, cfg.MasterURL, cfg.NodeID, cfg.AdvertiseAddress, cfg.HeartbeatInterval, cfg.CertDir)
 
 	slog.Info("worker server live", "port", cfg.Port, "worker_id", cfg.NodeID)
 	err = server.Start(ctx, cfg.Port)

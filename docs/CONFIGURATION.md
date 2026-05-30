@@ -7,6 +7,8 @@ wasmCat reads runtime configuration from environment variables and keeps local-d
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MASTER_PORT` | `7270` | HTTPS port for the master gateway. |
+| `CERT_DIR` | `./certs` | Directory containing `ca.crt`, `master.crt`, `master.key`, and worker certs. |
+| `AUTO_GENERATE_CERTS` | `true` | Generate local development CA/master/worker certs on master startup. Disable in production. |
 | `DEV_WORKER_ID` | `worker-vn-01` | Worker ID used by local dev certificate generation. |
 | `CLEANUP_INTERVAL` | `15s` | How often the master removes stale workers from the registry. |
 
@@ -18,6 +20,7 @@ wasmCat reads runtime configuration from environment variables and keeps local-d
 | `WORKER_PORT` | `7271` | HTTPS port for the worker invoke server. |
 | `MASTER_URL` | `https://localhost:7270` | Master URL used for registration and heartbeat. |
 | `WORKER_ADVERTISE_ADDRESS` | `localhost:<worker-port>` | Address the master uses to call this worker. |
+| `CERT_DIR` | `./certs` | Directory containing `ca.crt`, `worker-<id>.crt`, and `worker-<id>.key`. |
 | `HEARTBEAT_INTERVAL` | `5s` | Worker registration and heartbeat interval. |
 
 ## Worker Limits
@@ -36,6 +39,15 @@ Example:
 ```powershell
 $env:WORKER_ID="worker-us-01"
 $env:MASTER_URL="https://master.internal:7270"
+$env:CERT_DIR="C:\wasmcat\certs"
 $env:MAX_CONCURRENT_EXECS="8"
 go run ./cmd/worker
+```
+
+For production, mount certificates as secrets and disable local certificate generation:
+
+```powershell
+$env:AUTO_GENERATE_CERTS="false"
+$env:CERT_DIR="C:\wasmcat\certs"
+go run ./cmd/master
 ```

@@ -10,16 +10,17 @@ import (
 	"log/slog"
 	"net/http" // http server to listen for requests from the main process and respond with results
 	"os"
-	"path/filepath"
 	"time"
 	"wasmcat/internal/logging"
+	"wasmcat/internal/security"
 	"wasmcat/internal/shared"
 )
 
 // Dependency injection -> inject engine into server struct so the server can call its methods
 type WorkerServer struct {
-	Engine *WasmEngine
-	NodeID string
+	Engine  *WasmEngine
+	NodeID  string
+	CertDir string
 }
 
 func (s *WorkerServer) Handler() http.Handler {
@@ -90,7 +91,12 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WorkerServer) Start(ctx context.Context, port string) error {
-	caPEM, err := os.ReadFile(filepath.Join("./certs", "ca.crt"))
+	certDir := s.CertDir
+	if certDir == "" {
+		certDir = "./certs"
+	}
+
+	caPEM, err := os.ReadFile(security.CACertPath(certDir))
 	if err != nil {
 		return fmt.Errorf("read ca cert: %w", err)
 	}
@@ -111,8 +117,8 @@ func (s *WorkerServer) Start(ctx context.Context, port string) error {
 		TLSConfig: tlsConfig,
 	}
 
-	certFile := filepath.Join("./certs", fmt.Sprintf("worker-%s.crt", s.NodeID))
-	keyFile := filepath.Join("./certs", fmt.Sprintf("worker-%s.key", s.NodeID))
+	certFile := security.WorkerCertPath(certDir, s.NodeID)
+	keyFile := security.WorkerKeyPath(certDir, s.NodeID)
 
 	errCh := make(chan error, 1)
 	go func() {
