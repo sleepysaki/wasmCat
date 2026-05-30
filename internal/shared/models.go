@@ -1,6 +1,9 @@
 package shared
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Master node stores these in State Registry
 type WorkerNode struct {
@@ -41,6 +44,17 @@ type ExecutionRequest struct {
 	UserLon float64 `json:"user_lon,omitempty"`
 }
 
+func (r ExecutionRequest) Validate() error {
+	if r.ModuleName == "" {
+		return fmt.Errorf("module_name is required")
+	}
+	if r.ModuleURL == "" && r.ModuleRegistryURL == "" {
+		return fmt.Errorf("module_url or module_registry_url is required")
+	}
+
+	return nil
+}
+
 // ExecutionResponse is what the Worker returns to the Master,
 // and what the Master returns to the End-User.
 type ExecutionResponse struct {
@@ -63,4 +77,10 @@ type ExecutionResponse struct {
 type APIResponse struct {
 	Status  string `json:"status"`  // "success" or "error"
 	Message string `json:"message"` // e.g., "Worker registered successfully"
+}
+
+type ErrorResponse struct {
+	Error   string `json:"error"`
+	Code    string `json:"code,omitempty"`
+	Details string `json:"details,omitempty"`
 }

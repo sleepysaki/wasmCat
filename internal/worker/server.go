@@ -37,7 +37,11 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&req)
 	// Error handling in case user send bad JSON / nonexistent module
 	if err != nil {
-		http.Error(w, "Bad Request: invalid JSON: "+err.Error(), http.StatusBadRequest)
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+		return
+	}
+	if err := req.Validate(); err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
 		return
 	}
 
@@ -45,7 +49,7 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	// r.Context() connects execution to the HTTP request, so cancellation can flow downward.
 	result, err := s.Engine.Execute(r.Context(), req.ModuleName, req.ModuleURL, req.Payload, req.JITBearerToken)
 	if err != nil {
-		http.Error(w, "Bad Request: "+err.Error(), http.StatusBadRequest)
+		shared.WriteError(w, http.StatusBadRequest, "execution_failed", err)
 		return
 	}
 
@@ -53,8 +57,7 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	resp := shared.ExecutionResponse{
 		Result: result,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	shared.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *WorkerServer) Start(port string) error {

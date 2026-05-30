@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ type Dispatcher struct {
 	// group scheduler and registry for dispatcher to use
 	Registry  *Registry
 	Scheduler *Scheduler
+	Client    *http.Client
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) (shared.ExecutionResponse, error) {
@@ -55,23 +57,29 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) 
 		return shared.ExecutionResponse{}, err
 	}
 
-	return d.forwardToWorker(targetNode, req)
+	return d.forwardToWorker(ctx, targetNode, req)
 }
 
-func (d *Dispatcher) forwardToWorker(node shared.WorkerNode, req shared.ExecutionRequest) (shared.ExecutionResponse, error) {
+func (d *Dispatcher) forwardToWorker(ctx context.Context, node shared.WorkerNode, req shared.ExecutionRequest) (shared.ExecutionResponse, error) {
 	// Convert the request to JSON bytes
-	data, _ := json.Marshal(req)
+	data, err := json.Marshal(req)
+	if err != nil {
+		return shared.ExecutionResponse{}, fmt.Errorf("marshal worker request: %w", err)
+	}
 
 	// Build the Worker's URL
-	url := fmt.Sprintf("https://%s/invoke", strings.TrimPrefix(node.IPAddress, "https://"))
+	url := workerInvokeURL(node.IPAddress)
 
-	client, err := security.NewMTLSHTTPClient(filepath.Join("./certs", "master.crt"), filepath.Join("./certs", "master.key"), filepath.Join("./certs", "ca.crt"))
-	if err != nil {
-		return shared.ExecutionResponse{}, err
+	client := d.Client
+	if client == nil {
+		client, err = security.NewMTLSHTTPClient(filepath.Join("./certs", "master.crt"), filepath.Join("./certs", "master.key"), filepath.Join("./certs", "ca.crt"))
+		if err != nil {
+			return shared.ExecutionResponse{}, err
+		}
 	}
 
 	// Send the request
-	reqHTTP, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
+	reqHTTP, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
 		return shared.ExecutionResponse{}, err
 	}
@@ -83,9 +91,25 @@ func (d *Dispatcher) forwardToWorker(node shared.WorkerNode, req shared.Executio
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return shared.ExecutionResponse{}, fmt.Errorf("worker %s returned %s: %s", node.ID, resp.Status, strings.TrimSpace(string(body)))
+	}
+
 	// Decode the Worker's result
 	var execResp shared.ExecutionResponse
-	json.NewDecoder(resp.Body).Decode(&execResp)
+	if err := json.NewDecoder(resp.Body).Decode(&execResp); err != nil {
+		return shared.ExecutionResponse{}, fmt.Errorf("decode worker response: %w", err)
+	}
+	execResp.ExecutedOnNodeID = node.ID
 
 	return execResp, nil
+}
+
+func workerInvokeURL(address string) string {
+	if strings.HasPrefix(address, "http://") || strings.HasPrefix(address, "https://") {
+		return strings.TrimRight(address, "/") + "/invoke"
+	}
+
+	return fmt.Sprintf("https://%s/invoke", strings.TrimPrefix(address, "https://"))
 }
