@@ -12,7 +12,7 @@ import (
 func TestMasterHealthz(t *testing.T) {
 	gateway := newReadyGateway()
 
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/wasmcat/health", nil)
 	rec := httptest.NewRecorder()
 
 	gateway.Handler().ServeHTTP(rec, req)
@@ -33,7 +33,7 @@ func TestMasterHealthz(t *testing.T) {
 func TestMasterReadyz(t *testing.T) {
 	gateway := newReadyGateway()
 
-	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/wasmcat/ready", nil)
 	rec := httptest.NewRecorder()
 
 	gateway.Handler().ServeHTTP(rec, req)
@@ -54,7 +54,7 @@ func TestMasterReadyz(t *testing.T) {
 func TestMasterReadyzReturnsUnavailableWhenDependenciesMissing(t *testing.T) {
 	gateway := &master.Gateway{}
 
-	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/wasmcat/ready", nil)
 	rec := httptest.NewRecorder()
 
 	gateway.Handler().ServeHTTP(rec, req)

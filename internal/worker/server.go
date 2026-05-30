@@ -20,8 +20,8 @@ type WorkerServer struct {
 
 func (s *WorkerServer) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/readyz", s.handleReady)
+	mux.HandleFunc("/wasmcat/health", s.handleHealth)
+	mux.HandleFunc("/wasmcat/ready", s.handleReady)
 	mux.HandleFunc("/invoke", s.handleInvoke)
 	return mux
 }

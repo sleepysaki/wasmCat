@@ -13,7 +13,7 @@ import (
 func TestWorkerHealthz(t *testing.T) {
 	server := newReadyWorkerServer()
 
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/wasmcat/health", nil)
 	rec := httptest.NewRecorder()
 
 	server.Handler().ServeHTTP(rec, req)
@@ -34,7 +34,7 @@ func TestWorkerHealthz(t *testing.T) {
 func TestWorkerReadyz(t *testing.T) {
 	server := newReadyWorkerServer()
 
-	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/wasmcat/ready", nil)
 	rec := httptest.NewRecorder()
 
 	server.Handler().ServeHTTP(rec, req)
@@ -55,7 +55,7 @@ func TestWorkerReadyz(t *testing.T) {
 func TestWorkerReadyzReturnsUnavailableWhenEngineMissing(t *testing.T) {
 	server := &worker.WorkerServer{NodeID: "worker-test"}
 
-	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/wasmcat/ready", nil)
 	rec := httptest.NewRecorder()
 
 	server.Handler().ServeHTTP(rec, req)

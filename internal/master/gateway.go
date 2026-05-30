@@ -27,8 +27,8 @@ func NewGateway(reg *Registry) *Gateway {
 
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", g.handleHealth)
-	mux.HandleFunc("/readyz", g.handleReady)
+	mux.HandleFunc("/wasmcat/health", g.handleHealth)
+	mux.HandleFunc("/wasmcat/ready", g.handleReady)
 	mux.HandleFunc("/internal/register", g.handleRegister)
 	mux.HandleFunc("/internal/heartbeat", g.handleHeartbeat)
 	mux.HandleFunc("/api/v1/execute", g.handleExecute)
