@@ -45,6 +45,8 @@ Build-Binary -Name "wasmcat-worker" -Package "./cmd/worker" -TargetOS "linux" -T
 Build-Binary -Name "wasmcat-master" -Package "./cmd/master" -TargetOS "windows" -TargetArch "amd64"
 Build-Binary -Name "wasmcat-worker" -Package "./cmd/worker" -TargetOS "windows" -TargetArch "amd64"
 
+Copy-Item -Path (Join-Path $RootDir "packaging/systemd/wasmcat-*") -Destination $DistDir -Force
+
 $checksumFile = Join-Path $DistDir "checksums.txt"
 if (Test-Path $checksumFile) {
     Remove-Item -LiteralPath $checksumFile -Force

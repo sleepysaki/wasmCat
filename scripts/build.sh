@@ -36,6 +36,8 @@ build_binary "wasmcat-worker" "./cmd/worker" "linux" "amd64"
 build_binary "wasmcat-master" "./cmd/master" "windows" "amd64"
 build_binary "wasmcat-worker" "./cmd/worker" "windows" "amd64"
 
+cp "$ROOT_DIR"/packaging/systemd/wasmcat-* "$DIST_DIR"/
+
 if command -v sha256sum >/dev/null 2>&1; then
   (
     cd "$DIST_DIR"

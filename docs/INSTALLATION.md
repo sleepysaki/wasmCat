@@ -18,7 +18,39 @@ The binaries include the WASM runtime through wazero, so workers do not need an 
 
 The initialization design is documented in [BOOTSTRAP_PLAN.md](BOOTSTRAP_PLAN.md). The short version is: install the binary, run `init`, provide certificates, then start the service.
 
-## Build Release Binaries
+The release process is documented in [RELEASE_PLAN.md](RELEASE_PLAN.md). Tagged releases publish binaries, service templates, env templates, and checksums.
+
+## Install From A Release
+
+Set the repository and release version:
+
+```bash
+REPO="<owner>/<repo>"
+VERSION="v0.1.0"
+BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
+```
+
+Download the Linux master, Linux worker, systemd service files, and checksums:
+
+```bash
+curl -LO "$BASE_URL/wasmcat-master-linux-amd64"
+curl -LO "$BASE_URL/wasmcat-worker-linux-amd64"
+curl -LO "$BASE_URL/wasmcat-master.service"
+curl -LO "$BASE_URL/wasmcat-worker.service"
+curl -LO "$BASE_URL/checksums.txt"
+```
+
+Verify the downloaded files:
+
+```bash
+sha256sum -c checksums.txt --ignore-missing
+```
+
+Use only the binary required for the host role. A master host needs `wasmcat-master-linux-amd64`; a worker host needs `wasmcat-worker-linux-amd64`.
+
+## Build From Source
+
+Build from source when developing wasmCat or testing changes that are not published in a release.
 
 From the repository root on Linux or macOS:
 
@@ -45,6 +77,10 @@ dist/wasmcat-master-linux-amd64
 dist/wasmcat-worker-linux-amd64
 dist/wasmcat-master-windows-amd64.exe
 dist/wasmcat-worker-windows-amd64.exe
+dist/wasmcat-master.service
+dist/wasmcat-worker.service
+dist/wasmcat-master.env
+dist/wasmcat-worker.env
 dist/checksums.txt
 ```
 
@@ -69,7 +105,7 @@ sudo useradd --system --home /nonexistent --shell /usr/sbin/nologin wasmcat
 Install the master binary:
 
 ```bash
-sudo install -m 0755 dist/wasmcat-master-linux-amd64 /usr/local/bin/wasmcat-master
+sudo install -m 0755 wasmcat-master-linux-amd64 /usr/local/bin/wasmcat-master
 ```
 
 Initialize the master config:
@@ -114,7 +150,7 @@ sudo chmod 0640 /etc/wasmcat/certs/*.crt /etc/wasmcat/certs/*.key
 Install the service file:
 
 ```bash
-sudo install -m 0644 packaging/systemd/wasmcat-master.service /etc/systemd/system/wasmcat-master.service
+sudo install -m 0644 wasmcat-master.service /etc/systemd/system/wasmcat-master.service
 ```
 
 Start the service:
@@ -143,7 +179,7 @@ sudo useradd --system --home /nonexistent --shell /usr/sbin/nologin wasmcat || t
 Install the worker binary:
 
 ```bash
-sudo install -m 0755 dist/wasmcat-worker-linux-amd64 /usr/local/bin/wasmcat-worker
+sudo install -m 0755 wasmcat-worker-linux-amd64 /usr/local/bin/wasmcat-worker
 ```
 
 Initialize the worker config:
@@ -195,7 +231,7 @@ sudo chmod 0640 /etc/wasmcat/certs/*.crt /etc/wasmcat/certs/*.key
 Install the service file:
 
 ```bash
-sudo install -m 0644 packaging/systemd/wasmcat-worker.service /etc/systemd/system/wasmcat-worker.service
+sudo install -m 0644 wasmcat-worker.service /etc/systemd/system/wasmcat-worker.service
 ```
 
 Start the worker:
@@ -246,14 +282,14 @@ This mode is for development only. Production should provide certificates throug
 Build or download the new release, replace the binary, and restart the service:
 
 ```bash
-sudo install -m 0755 dist/wasmcat-master-linux-amd64 /usr/local/bin/wasmcat-master
+sudo install -m 0755 wasmcat-master-linux-amd64 /usr/local/bin/wasmcat-master
 sudo systemctl restart wasmcat-master
 ```
 
 For workers:
 
 ```bash
-sudo install -m 0755 dist/wasmcat-worker-linux-amd64 /usr/local/bin/wasmcat-worker
+sudo install -m 0755 wasmcat-worker-linux-amd64 /usr/local/bin/wasmcat-worker
 sudo systemctl restart wasmcat-worker
 ```
 
