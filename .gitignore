@@ -38,3 +38,5 @@ til/
 modules/
 test_modules/
 .gocache
+.gomodcache
+dist/

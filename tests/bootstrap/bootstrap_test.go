@@ -1,0 +1,161 @@
+package bootstrap_test
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"wasmcat/internal/bootstrap"
+	"wasmcat/internal/security"
+)
+
+func TestInitMasterWritesProductionEnv(t *testing.T) {
+	configDir := t.TempDir()
+	certDir := filepath.Join(configDir, "certs")
+
+	result, err := bootstrap.InitMaster(bootstrap.MasterOptions{
+		ConfigDir:       configDir,
+		CertDir:         certDir,
+		Port:            "9443",
+		CleanupInterval: "30s",
+		DevWorkerID:     "worker-test-01",
+	})
+	if err != nil {
+		t.Fatalf("InitMaster returned error: %v", err)
+	}
+
+	if result.ConfigPath != filepath.Join(configDir, "master.env") {
+		t.Fatalf("unexpected config path %q", result.ConfigPath)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("expected production cert warning")
+	}
+
+	env := readFile(t, result.ConfigPath)
+	assertContains(t, env, "MASTER_PORT=9443\n")
+	assertContains(t, env, "CERT_DIR="+certDir+"\n")
+	assertContains(t, env, "AUTO_GENERATE_CERTS=false\n")
+	assertContains(t, env, "DEV_WORKER_ID=worker-test-01\n")
+	assertContains(t, env, "CLEANUP_INTERVAL=30s\n")
+}
+
+func TestInitMasterRefusesToOverwriteEnvWithoutForce(t *testing.T) {
+	configDir := t.TempDir()
+	certDir := filepath.Join(configDir, "certs")
+
+	_, err := bootstrap.InitMaster(bootstrap.MasterOptions{
+		ConfigDir: configDir,
+		CertDir:   certDir,
+	})
+	if err != nil {
+		t.Fatalf("first InitMaster returned error: %v", err)
+	}
+
+	_, err = bootstrap.InitMaster(bootstrap.MasterOptions{
+		ConfigDir: configDir,
+		CertDir:   certDir,
+	})
+	if err == nil {
+		t.Fatal("expected overwrite protection error")
+	}
+}
+
+func TestInitMasterGeneratesDevelopmentCerts(t *testing.T) {
+	configDir := t.TempDir()
+	certDir := filepath.Join(configDir, "certs")
+	workerID := "worker-dev-01"
+
+	_, err := bootstrap.InitMaster(bootstrap.MasterOptions{
+		ConfigDir:        configDir,
+		CertDir:          certDir,
+		DevWorkerID:      workerID,
+		GenerateDevCerts: true,
+	})
+	if err != nil {
+		t.Fatalf("InitMaster returned error: %v", err)
+	}
+
+	assertFileExists(t, security.CACertPath(certDir))
+	assertFileExists(t, security.MasterCertPath(certDir))
+	assertFileExists(t, security.MasterKeyPath(certDir))
+	assertFileExists(t, security.WorkerCertPath(certDir, workerID))
+	assertFileExists(t, security.WorkerKeyPath(certDir, workerID))
+}
+
+func TestInitWorkerWritesEnv(t *testing.T) {
+	configDir := t.TempDir()
+	certDir := filepath.Join(configDir, "certs")
+
+	result, err := bootstrap.InitWorker(bootstrap.WorkerOptions{
+		ConfigDir:          configDir,
+		CertDir:            certDir,
+		WorkerID:           "worker-us-01",
+		Port:               "9444",
+		MasterURL:          "https://master.example.com:7270",
+		AdvertiseAddress:   "worker-us-01.example.com:9444",
+		MaxModuleBytes:     10 << 20,
+		MaxPayloadBytes:    1 << 20,
+		MaxOutputBytes:     1 << 20,
+		MaxConcurrentExecs: 8,
+	})
+	if err != nil {
+		t.Fatalf("InitWorker returned error: %v", err)
+	}
+
+	env := readFile(t, result.ConfigPath)
+	assertContains(t, env, "WORKER_ID=worker-us-01\n")
+	assertContains(t, env, "WORKER_PORT=9444\n")
+	assertContains(t, env, "MASTER_URL=https://master.example.com:7270\n")
+	assertContains(t, env, "WORKER_ADVERTISE_ADDRESS=worker-us-01.example.com:9444\n")
+	assertContains(t, env, "MAX_CONCURRENT_EXECS=8\n")
+}
+
+func TestInitWorkerRejectsInvalidMasterURL(t *testing.T) {
+	_, err := bootstrap.InitWorker(bootstrap.WorkerOptions{
+		ConfigDir: "config",
+		CertDir:   "certs",
+		MasterURL: "http://master.example.com:7270",
+	})
+	if err == nil {
+		t.Fatal("expected invalid master URL error")
+	}
+}
+
+func TestInitWorkerRejectsInvalidLimits(t *testing.T) {
+	_, err := bootstrap.InitWorker(bootstrap.WorkerOptions{
+		ConfigDir:        "config",
+		CertDir:          "certs",
+		MasterURL:        "https://master.example.com:7270",
+		AdvertiseAddress: "worker.example.com:7271",
+	})
+	if err == nil {
+		t.Fatal("expected invalid worker limit error")
+	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	return string(content)
+}
+
+func assertContains(t *testing.T, content string, expected string) {
+	t.Helper()
+
+	if !strings.Contains(content, expected) {
+		t.Fatalf("expected %q to contain %q", content, expected)
+	}
+}
+
+func assertFileExists(t *testing.T, path string) {
+	t.Helper()
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected %s to exist: %v", path, err)
+	}
+}

@@ -1,0 +1,306 @@
+package bootstrap
+
+import (
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+	"wasmcat/internal/security"
+)
+
+type MasterOptions struct {
+	ConfigDir        string
+	CertDir          string
+	Port             string
+	CleanupInterval  string
+	DevWorkerID      string
+	GenerateDevCerts bool
+	Force            bool
+}
+
+type WorkerOptions struct {
+	ConfigDir          string
+	CertDir            string
+	WorkerID           string
+	Port               string
+	MasterURL          string
+	AdvertiseAddress   string
+	HeartbeatInterval  string
+	ExecutionTimeout   string
+	ModuleFetchTimeout string
+	MaxModuleBytes     int64
+	MaxPayloadBytes    int64
+	MaxOutputBytes     uint32
+	MaxConcurrentExecs int
+	Force              bool
+}
+
+type Result struct {
+	ConfigPath string
+	CertDir    string
+	Warnings   []string
+}
+
+func InitMaster(options MasterOptions) (Result, error) {
+	options = normalizeMaster(options)
+	if err := validateMaster(options); err != nil {
+		return Result{}, err
+	}
+
+	if err := os.MkdirAll(options.ConfigDir, 0o755); err != nil {
+		return Result{}, fmt.Errorf("create config directory: %w", err)
+	}
+	if err := os.MkdirAll(options.CertDir, 0o755); err != nil {
+		return Result{}, fmt.Errorf("create cert directory: %w", err)
+	}
+
+	if options.GenerateDevCerts {
+		if err := ensureDevCertTargetsCanBeWritten(options.CertDir, options.DevWorkerID, options.Force); err != nil {
+			return Result{}, err
+		}
+		if err := security.GenerateCAAndCerts(options.CertDir, options.DevWorkerID); err != nil {
+			return Result{}, err
+		}
+	}
+
+	configPath := filepath.Join(options.ConfigDir, "master.env")
+	values := []envValue{
+		{"MASTER_PORT", options.Port},
+		{"CERT_DIR", options.CertDir},
+		{"AUTO_GENERATE_CERTS", "false"},
+		{"DEV_WORKER_ID", options.DevWorkerID},
+		{"CLEANUP_INTERVAL", options.CleanupInterval},
+	}
+
+	if err := writeEnvFile(configPath, values, options.Force); err != nil {
+		return Result{}, err
+	}
+
+	result := Result{ConfigPath: configPath, CertDir: options.CertDir}
+	if !options.GenerateDevCerts {
+		result.Warnings = append(result.Warnings, "copy ca.crt, master.crt, and master.key into the cert directory before starting the master")
+	}
+
+	return result, nil
+}
+
+func InitWorker(options WorkerOptions) (Result, error) {
+	options = normalizeWorker(options)
+	if err := validateWorker(options); err != nil {
+		return Result{}, err
+	}
+
+	if err := os.MkdirAll(options.ConfigDir, 0o755); err != nil {
+		return Result{}, fmt.Errorf("create config directory: %w", err)
+	}
+	if err := os.MkdirAll(options.CertDir, 0o755); err != nil {
+		return Result{}, fmt.Errorf("create cert directory: %w", err)
+	}
+
+	configPath := filepath.Join(options.ConfigDir, "worker.env")
+	values := []envValue{
+		{"WORKER_ID", options.WorkerID},
+		{"WORKER_PORT", options.Port},
+		{"MASTER_URL", options.MasterURL},
+		{"WORKER_ADVERTISE_ADDRESS", options.AdvertiseAddress},
+		{"CERT_DIR", options.CertDir},
+		{"HEARTBEAT_INTERVAL", options.HeartbeatInterval},
+		{"EXECUTION_TIMEOUT", options.ExecutionTimeout},
+		{"MODULE_FETCH_TIMEOUT", options.ModuleFetchTimeout},
+		{"MAX_MODULE_BYTES", strconv.FormatInt(options.MaxModuleBytes, 10)},
+		{"MAX_PAYLOAD_BYTES", strconv.FormatInt(options.MaxPayloadBytes, 10)},
+		{"MAX_OUTPUT_BYTES", strconv.FormatUint(uint64(options.MaxOutputBytes), 10)},
+		{"MAX_CONCURRENT_EXECS", strconv.Itoa(options.MaxConcurrentExecs)},
+	}
+
+	if err := writeEnvFile(configPath, values, options.Force); err != nil {
+		return Result{}, err
+	}
+
+	return Result{
+		ConfigPath: configPath,
+		CertDir:    options.CertDir,
+		Warnings: []string{
+			fmt.Sprintf("copy ca.crt, worker-%s.crt, and worker-%s.key into the cert directory before starting the worker", options.WorkerID, options.WorkerID),
+		},
+	}, nil
+}
+
+func normalizeMaster(options MasterOptions) MasterOptions {
+	if options.Port == "" {
+		options.Port = "7270"
+	}
+	if options.CleanupInterval == "" {
+		options.CleanupInterval = "15s"
+	}
+	if options.DevWorkerID == "" {
+		options.DevWorkerID = "worker-vn-01"
+	}
+	if options.CertDir == "" && options.ConfigDir != "" {
+		options.CertDir = filepath.Join(options.ConfigDir, "certs")
+	}
+
+	return options
+}
+
+func normalizeWorker(options WorkerOptions) WorkerOptions {
+	if options.Port == "" {
+		options.Port = "7271"
+	}
+	if options.WorkerID == "" {
+		options.WorkerID = "worker-vn-01"
+	}
+	if options.MasterURL == "" {
+		options.MasterURL = "https://localhost:7270"
+	}
+	if options.AdvertiseAddress == "" {
+		options.AdvertiseAddress = "localhost:" + options.Port
+	}
+	if options.HeartbeatInterval == "" {
+		options.HeartbeatInterval = "5s"
+	}
+	if options.ExecutionTimeout == "" {
+		options.ExecutionTimeout = "5s"
+	}
+	if options.ModuleFetchTimeout == "" {
+		options.ModuleFetchTimeout = "10s"
+	}
+	if options.CertDir == "" && options.ConfigDir != "" {
+		options.CertDir = filepath.Join(options.ConfigDir, "certs")
+	}
+
+	return options
+}
+
+func validateMaster(options MasterOptions) error {
+	if strings.TrimSpace(options.ConfigDir) == "" {
+		return fmt.Errorf("config directory is required")
+	}
+	if strings.TrimSpace(options.CertDir) == "" {
+		return fmt.Errorf("cert directory is required")
+	}
+	if strings.TrimSpace(options.Port) == "" {
+		return fmt.Errorf("master port is required")
+	}
+	if strings.TrimSpace(options.DevWorkerID) == "" {
+		return fmt.Errorf("dev worker id is required")
+	}
+	if _, err := time.ParseDuration(options.CleanupInterval); err != nil {
+		return fmt.Errorf("parse cleanup interval: %w", err)
+	}
+
+	return nil
+}
+
+func validateWorker(options WorkerOptions) error {
+	if strings.TrimSpace(options.ConfigDir) == "" {
+		return fmt.Errorf("config directory is required")
+	}
+	if strings.TrimSpace(options.CertDir) == "" {
+		return fmt.Errorf("cert directory is required")
+	}
+	if strings.TrimSpace(options.WorkerID) == "" {
+		return fmt.Errorf("worker id is required")
+	}
+	if strings.TrimSpace(options.Port) == "" {
+		return fmt.Errorf("worker port is required")
+	}
+	if err := validateURL(options.MasterURL); err != nil {
+		return err
+	}
+	if strings.TrimSpace(options.AdvertiseAddress) == "" {
+		return fmt.Errorf("worker advertise address is required")
+	}
+	if _, err := time.ParseDuration(options.HeartbeatInterval); err != nil {
+		return fmt.Errorf("parse heartbeat interval: %w", err)
+	}
+	if _, err := time.ParseDuration(options.ExecutionTimeout); err != nil {
+		return fmt.Errorf("parse execution timeout: %w", err)
+	}
+	if _, err := time.ParseDuration(options.ModuleFetchTimeout); err != nil {
+		return fmt.Errorf("parse module fetch timeout: %w", err)
+	}
+	if options.MaxModuleBytes <= 0 {
+		return fmt.Errorf("max module bytes must be greater than zero")
+	}
+	if options.MaxPayloadBytes <= 0 {
+		return fmt.Errorf("max payload bytes must be greater than zero")
+	}
+	if options.MaxOutputBytes == 0 {
+		return fmt.Errorf("max output bytes must be greater than zero")
+	}
+	if options.MaxConcurrentExecs <= 0 {
+		return fmt.Errorf("max concurrent executions must be greater than zero")
+	}
+
+	return nil
+}
+
+func validateURL(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("parse master url: %w", err)
+	}
+	if parsed.Scheme != "https" || parsed.Host == "" {
+		return fmt.Errorf("master url must be an https URL with a host")
+	}
+
+	return nil
+}
+
+func ensureDevCertTargetsCanBeWritten(certDir string, workerID string, force bool) error {
+	if force {
+		return nil
+	}
+
+	paths := []string{
+		security.CACertPath(certDir),
+		filepath.Join(certDir, "ca.key"),
+		security.MasterCertPath(certDir),
+		security.MasterKeyPath(certDir),
+		security.WorkerCertPath(certDir, workerID),
+		security.WorkerKeyPath(certDir, workerID),
+	}
+
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("%s already exists; use --force to overwrite development certificates", path)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("check %s: %w", path, err)
+		}
+	}
+
+	return nil
+}
+
+type envValue struct {
+	Name  string
+	Value string
+}
+
+func writeEnvFile(path string, values []envValue, force bool) error {
+	if !force {
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("%s already exists; use --force to overwrite it", path)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("check %s: %w", path, err)
+		}
+	}
+
+	var builder strings.Builder
+	for _, value := range values {
+		builder.WriteString(value.Name)
+		builder.WriteString("=")
+		builder.WriteString(value.Value)
+		builder.WriteString("\n")
+	}
+
+	if err := os.WriteFile(path, []byte(builder.String()), 0o644); err != nil {
+		return fmt.Errorf("write env file: %w", err)
+	}
+
+	return nil
+}

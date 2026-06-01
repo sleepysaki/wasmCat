@@ -43,3 +43,6 @@ jobs:
 
       - name: Build packages
         run: go build ./...
+
+      - name: Build native release artifacts
+        run: sh scripts/build.sh

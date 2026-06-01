@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
+	"wasmcat/internal/bootstrap"
 	"wasmcat/internal/config"
 	"wasmcat/internal/logging"
 	"wasmcat/internal/master"
@@ -14,6 +18,14 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "init" {
+		if err := runInit(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "init failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	logging.Configure("master")
 	slog.Info("initializing control plane")
 
@@ -91,4 +103,52 @@ func main() {
 	if err != nil {
 		slog.Error("master gateway crashed", "error", err)
 	}
+}
+
+func runInit(args []string) error {
+	configDirDefault := defaultConfigDir()
+
+	flags := flag.NewFlagSet("wasmcat-master init", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+
+	configDir := flags.String("config-dir", configDirDefault, "directory for master.env")
+	certDir := flags.String("cert-dir", "", "directory for mTLS certificates; defaults to <config-dir>/certs")
+	port := flags.String("port", "7270", "master HTTPS port")
+	cleanupInterval := flags.String("cleanup-interval", "15s", "registry cleanup interval")
+	devWorkerID := flags.String("dev-worker-id", "worker-vn-01", "worker ID used when generating development certificates")
+	devCerts := flags.Bool("dev-certs", false, "generate local development certificates")
+	force := flags.Bool("force", false, "overwrite existing generated files")
+
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	result, err := bootstrap.InitMaster(bootstrap.MasterOptions{
+		ConfigDir:        *configDir,
+		CertDir:          *certDir,
+		Port:             *port,
+		CleanupInterval:  *cleanupInterval,
+		DevWorkerID:      *devWorkerID,
+		GenerateDevCerts: *devCerts,
+		Force:            *force,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("created master config: %s\n", result.ConfigPath)
+	fmt.Printf("using certificate directory: %s\n", result.CertDir)
+	for _, warning := range result.Warnings {
+		fmt.Printf("next: %s\n", warning)
+	}
+
+	return nil
+}
+
+func defaultConfigDir() string {
+	if runtime.GOOS == "windows" {
+		return `C:\wasmcat`
+	}
+
+	return "/etc/wasmcat"
 }
