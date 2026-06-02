@@ -16,13 +16,20 @@ import (
 )
 
 // StartTelemetry begins sending heartbeats to the Master node.
-// masterURL should be something like "http://localhost:8080"
-func StartTelemetry(ctx context.Context, masterURL string, nodeID string, workerAddress string, interval time.Duration, certDir string) {
+// masterURL should be something like "https://localhost:7270"
+func StartTelemetry(ctx context.Context, masterURL string, nodeID string, workerAddress string, latitude float64, longitude float64, interval time.Duration, certDir string) {
+	StartTelemetryWithMetrics(ctx, masterURL, nodeID, workerAddress, latitude, longitude, interval, certDir, SystemMetricsProvider{})
+}
+
+func StartTelemetryWithMetrics(ctx context.Context, masterURL string, nodeID string, workerAddress string, latitude float64, longitude float64, interval time.Duration, certDir string, metricsProvider MetricsProvider) {
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
 	if certDir == "" {
 		certDir = "./certs"
+	}
+	if metricsProvider == nil {
+		metricsProvider = SystemMetricsProvider{}
 	}
 
 	client, err := newMTLSClient(certDir, nodeID)
@@ -31,7 +38,8 @@ func StartTelemetry(ctx context.Context, masterURL string, nodeID string, worker
 		return
 	}
 
-	registerWorker(client, masterURL, nodeID, workerAddress)
+	registerWorker(client, masterURL, nodeID, workerAddress, latitude, longitude)
+	sendHeartbeat(ctx, client, masterURL, nodeID, metricsProvider)
 	// Create a ticker that fires on the configured heartbeat interval
 	// time.Sleep() in a loop is not used because it can block thread, no easy cancellation, and less accurate
 	ticker := time.NewTicker(interval)
@@ -44,9 +52,9 @@ func StartTelemetry(ctx context.Context, masterURL string, nodeID string, worker
 			slog.Info("telemetry stopped", "worker_id", nodeID)
 			return
 		case <-ticker.C:
-			registerWorker(client, masterURL, nodeID, workerAddress)
+			registerWorker(client, masterURL, nodeID, workerAddress, latitude, longitude)
 			// Send heartbeat to Master
-			sendHeartbeat(client, masterURL, nodeID)
+			sendHeartbeat(ctx, client, masterURL, nodeID, metricsProvider)
 		}
 	}
 }
@@ -81,10 +89,12 @@ func newMTLSClient(certDir string, nodeID string) (*http.Client, error) {
 	return &http.Client{Transport: transport}, nil
 }
 
-func registerWorker(client *http.Client, masterURL string, nodeID string, workerAddress string) {
+func registerWorker(client *http.Client, masterURL string, nodeID string, workerAddress string, latitude float64, longitude float64) {
 	node := shared.WorkerNode{
 		ID:        nodeID,
 		IPAddress: workerAddress,
+		Latitude:  latitude,
+		Longitude: longitude,
 	}
 
 	data, err := json.Marshal(node)
@@ -116,12 +126,17 @@ func registerWorker(client *http.Client, masterURL string, nodeID string, worker
 }
 
 // Construct a Heartbeat struct, convert to JSON, send to the Master node via HTTP POST
-func sendHeartbeat(client *http.Client, masterURL string, nodeID string) {
-	// Create the payload, temp hardcode value
+func sendHeartbeat(ctx context.Context, client *http.Client, masterURL string, nodeID string, metricsProvider MetricsProvider) {
+	metrics, err := metricsProvider.Snapshot(ctx)
+	if err != nil {
+		slog.Error("heartbeat metrics error", "worker_id", nodeID, "error", err)
+		return
+	}
+
 	beat := shared.Heartbeat{
 		NodeID:    nodeID,
-		CPUFree:   95.5,
-		RAMFreeMB: 2048,
+		CPUFree:   metrics.CPUFree,
+		RAMFreeMB: metrics.RAMFreeMB,
 	}
 
 	// Convert struct to JSON bytes

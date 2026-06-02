@@ -12,13 +12,15 @@ import (
 )
 
 type MasterOptions struct {
-	ConfigDir        string
-	CertDir          string
-	Port             string
-	CleanupInterval  string
-	DevWorkerID      string
-	GenerateDevCerts bool
-	Force            bool
+	ConfigDir          string
+	CertDir            string
+	Port               string
+	CleanupInterval    string
+	MinWorkerCPUFree   float64
+	MinWorkerRAMFreeMB float64
+	DevWorkerID        string
+	GenerateDevCerts   bool
+	Force              bool
 }
 
 type WorkerOptions struct {
@@ -28,6 +30,8 @@ type WorkerOptions struct {
 	Port               string
 	MasterURL          string
 	AdvertiseAddress   string
+	Latitude           float64
+	Longitude          float64
 	HeartbeatInterval  string
 	ExecutionTimeout   string
 	ModuleFetchTimeout string
@@ -73,6 +77,8 @@ func InitMaster(options MasterOptions) (Result, error) {
 		{"AUTO_GENERATE_CERTS", "false"},
 		{"DEV_WORKER_ID", options.DevWorkerID},
 		{"CLEANUP_INTERVAL", options.CleanupInterval},
+		{"MIN_WORKER_CPU_FREE", strconv.FormatFloat(options.MinWorkerCPUFree, 'f', -1, 64)},
+		{"MIN_WORKER_RAM_FREE_MB", strconv.FormatFloat(options.MinWorkerRAMFreeMB, 'f', -1, 64)},
 	}
 
 	if err := writeEnvFile(configPath, values, options.Force); err != nil {
@@ -106,6 +112,8 @@ func InitWorker(options WorkerOptions) (Result, error) {
 		{"WORKER_PORT", options.Port},
 		{"MASTER_URL", options.MasterURL},
 		{"WORKER_ADVERTISE_ADDRESS", options.AdvertiseAddress},
+		{"WORKER_LATITUDE", strconv.FormatFloat(options.Latitude, 'f', -1, 64)},
+		{"WORKER_LONGITUDE", strconv.FormatFloat(options.Longitude, 'f', -1, 64)},
 		{"CERT_DIR", options.CertDir},
 		{"HEARTBEAT_INTERVAL", options.HeartbeatInterval},
 		{"EXECUTION_TIMEOUT", options.ExecutionTimeout},
@@ -213,6 +221,12 @@ func validateWorker(options WorkerOptions) error {
 	}
 	if strings.TrimSpace(options.AdvertiseAddress) == "" {
 		return fmt.Errorf("worker advertise address is required")
+	}
+	if options.Latitude < -90 || options.Latitude > 90 {
+		return fmt.Errorf("worker latitude must be between -90 and 90")
+	}
+	if options.Longitude < -180 || options.Longitude > 180 {
+		return fmt.Errorf("worker longitude must be between -180 and 180")
 	}
 	if _, err := time.ParseDuration(options.HeartbeatInterval); err != nil {
 		return fmt.Errorf("parse heartbeat interval: %w", err)

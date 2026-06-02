@@ -14,11 +14,13 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 	certDir := filepath.Join(configDir, "certs")
 
 	result, err := bootstrap.InitMaster(bootstrap.MasterOptions{
-		ConfigDir:       configDir,
-		CertDir:         certDir,
-		Port:            "9443",
-		CleanupInterval: "30s",
-		DevWorkerID:     "worker-test-01",
+		ConfigDir:          configDir,
+		CertDir:            certDir,
+		Port:               "9443",
+		CleanupInterval:    "30s",
+		MinWorkerCPUFree:   10,
+		MinWorkerRAMFreeMB: 256,
+		DevWorkerID:        "worker-test-01",
 	})
 	if err != nil {
 		t.Fatalf("InitMaster returned error: %v", err)
@@ -37,6 +39,8 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 	assertContains(t, env, "AUTO_GENERATE_CERTS=false\n")
 	assertContains(t, env, "DEV_WORKER_ID=worker-test-01\n")
 	assertContains(t, env, "CLEANUP_INTERVAL=30s\n")
+	assertContains(t, env, "MIN_WORKER_CPU_FREE=10\n")
+	assertContains(t, env, "MIN_WORKER_RAM_FREE_MB=256\n")
 }
 
 func TestInitMasterRefusesToOverwriteEnvWithoutForce(t *testing.T) {
@@ -93,6 +97,8 @@ func TestInitWorkerWritesEnv(t *testing.T) {
 		Port:               "9444",
 		MasterURL:          "https://master.example.com:7270",
 		AdvertiseAddress:   "worker-us-01.example.com:9444",
+		Latitude:           40.7128,
+		Longitude:          -74.006,
 		MaxModuleBytes:     10 << 20,
 		MaxPayloadBytes:    1 << 20,
 		MaxOutputBytes:     1 << 20,
@@ -107,6 +113,8 @@ func TestInitWorkerWritesEnv(t *testing.T) {
 	assertContains(t, env, "WORKER_PORT=9444\n")
 	assertContains(t, env, "MASTER_URL=https://master.example.com:7270\n")
 	assertContains(t, env, "WORKER_ADVERTISE_ADDRESS=worker-us-01.example.com:9444\n")
+	assertContains(t, env, "WORKER_LATITUDE=40.7128\n")
+	assertContains(t, env, "WORKER_LONGITUDE=-74.006\n")
 	assertContains(t, env, "MAX_CONCURRENT_EXECS=8\n")
 }
 

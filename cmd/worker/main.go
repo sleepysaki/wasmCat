@@ -54,7 +54,7 @@ func main() {
 
 	// This runs in the background and pings the Master every 5 seconds
 	slog.Info("starting telemetry pulse", "master_url", cfg.MasterURL, "worker_id", cfg.NodeID, "interval", cfg.HeartbeatInterval.String())
-	go worker.StartTelemetry(ctx, cfg.MasterURL, cfg.NodeID, cfg.AdvertiseAddress, cfg.HeartbeatInterval, cfg.CertDir)
+	go worker.StartTelemetry(ctx, cfg.MasterURL, cfg.NodeID, cfg.AdvertiseAddress, cfg.Latitude, cfg.Longitude, cfg.HeartbeatInterval, cfg.CertDir)
 
 	slog.Info("worker server live", "port", cfg.Port, "worker_id", cfg.NodeID)
 	err = server.Start(ctx, cfg.Port)
@@ -75,6 +75,8 @@ func runInit(args []string) error {
 	port := flags.String("port", "7271", "worker HTTPS port")
 	masterURL := flags.String("master-url", "https://localhost:7270", "master gateway URL")
 	advertiseAddress := flags.String("advertise-address", "", "address the master uses to call this worker")
+	latitude := flags.Float64("latitude", 0, "worker latitude used by the scheduler")
+	longitude := flags.Float64("longitude", 0, "worker longitude used by the scheduler")
 	heartbeatInterval := flags.String("heartbeat-interval", "5s", "master heartbeat interval")
 	executionTimeout := flags.String("execution-timeout", "5s", "maximum execution duration")
 	moduleFetchTimeout := flags.String("module-fetch-timeout", "10s", "maximum module fetch duration")
@@ -98,6 +100,8 @@ func runInit(args []string) error {
 		Port:               *port,
 		MasterURL:          *masterURL,
 		AdvertiseAddress:   *advertiseAddress,
+		Latitude:           *latitude,
+		Longitude:          *longitude,
 		HeartbeatInterval:  *heartbeatInterval,
 		ExecutionTimeout:   *executionTimeout,
 		ModuleFetchTimeout: *moduleFetchTimeout,

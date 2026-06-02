@@ -113,7 +113,9 @@ Initialize the master config:
 ```bash
 sudo wasmcat-master init \
   --config-dir /etc/wasmcat \
-  --cert-dir /etc/wasmcat/certs
+  --cert-dir /etc/wasmcat/certs \
+  --min-worker-cpu-free 10 \
+  --min-worker-ram-free-mb 256
 ```
 
 This creates:
@@ -129,6 +131,8 @@ The generated production config keeps local certificate generation disabled:
 AUTO_GENERATE_CERTS=false
 CERT_DIR=/etc/wasmcat/certs
 MASTER_PORT=7270
+MIN_WORKER_CPU_FREE=10
+MIN_WORKER_RAM_FREE_MB=256
 ```
 
 Mount or copy these files into `/etc/wasmcat/certs`:
@@ -189,6 +193,8 @@ sudo wasmcat-worker init \
   --worker-id worker-us-01 \
   --master-url https://master.example.com:7270 \
   --advertise-address worker-us-01.example.com:7271 \
+  --latitude 40.7128 \
+  --longitude -74.0060 \
   --config-dir /etc/wasmcat \
   --cert-dir /etc/wasmcat/certs
 ```
@@ -206,6 +212,8 @@ The generated config includes the worker identity, master URL, advertised addres
 WORKER_ID=worker-us-01
 MASTER_URL=https://master.example.com:7270
 WORKER_ADVERTISE_ADDRESS=worker-us-01.example.com:7271
+WORKER_LATITUDE=40.7128
+WORKER_LONGITUDE=-74.006
 CERT_DIR=/etc/wasmcat/certs
 MAX_CONCURRENT_EXECS=4
 ```
@@ -271,6 +279,8 @@ Then start a worker in another terminal:
 $env:WORKER_ID="worker-vn-01"
 $env:MASTER_URL="https://localhost:7270"
 $env:WORKER_ADVERTISE_ADDRESS="localhost:7271"
+$env:WORKER_LATITUDE="13.7563"
+$env:WORKER_LONGITUDE="100.5018"
 $env:CERT_DIR="./run/wasmcat/certs"
 go run ./cmd/worker
 ```

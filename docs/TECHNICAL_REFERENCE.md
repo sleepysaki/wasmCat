@@ -1,0 +1,1012 @@
+# wasmCat Technical Documentation
+
+## 1. System Architecture & Overview
+
+### High-Level Purpose
+
+wasmCat is a native master-worker WebAssembly orchestration system. The master process accepts execution requests, tracks worker nodes, chooses a target worker, resolves Azure Container Registry (ACR) module references when needed, and dispatches work over mutual TLS. The worker process registers with the master, receives execution requests, fetches and compiles WASM modules with wazero, writes request payloads into WASM linear memory, invokes the module ABI, and returns the output.
+
+The core responsibility is to execute WASM modules on registered workers without requiring Docker, containerd, Kubernetes, or an external WASM runtime.
+
+### Architectural Pattern
+
+- **Master-worker architecture:** `cmd/master` runs the control plane. `cmd/worker` runs execution nodes.
+- **Control plane/data plane split:** Master APIs handle registration, scheduling, and dispatch. Worker APIs handle module invocation.
+- **Coordinator pattern:** `master.Dispatcher` coordinates registry lookup, ACR resolution, worker selection, and mTLS forwarding.
+- **Strategy-like scheduling:** `master.Scheduler` isolates worker selection logic. The current strategy filters workers below configured CPU/RAM thresholds, then chooses the nearest eligible worker using Haversine distance.
+- **Dependency injection:** `Gateway`, `Dispatcher`, and `WorkerServer` receive dependencies as struct fields, which also makes handler tests possible.
+- **In-memory registry/cache:** Worker state is held in `Registry.workers`; compiled modules are held in `WasmEngine.cache`.
+- **Event-loop background tasks:** Master cleanup and worker telemetry run on tickers controlled by cancellation contexts.
+- **Native release packaging:** `scripts/build.*`, systemd templates, and GitHub release workflow distribute binaries and service files.
+
+### Control Flow
+
+#### Master runtime lifecycle
+
+1. `cmd/master/main.go` checks whether the first argument is `init`.
+2. If `init` is present, `runInit` parses flags and calls `bootstrap.InitMaster`, then exits.
+3. Normal startup calls `logging.Configure("master")`.
+4. `signal.NotifyContext` creates a root context cancelled by `SIGINT` or `SIGTERM`.
+5. `config.LoadMaster` reads master environment variables.
+6. The process constructs `Registry`, `Scheduler`, `Dispatcher`, and `Gateway`.
+7. If `AUTO_GENERATE_CERTS=true`, `security.GenerateCAAndCerts` writes a local CA, master cert, and worker cert.
+8. A cleanup goroutine calls `Registry.Cleanup` on `CLEANUP_INTERVAL`.
+9. `Gateway.Start` loads CA/master certificates, creates an HTTPS server requiring client certificates, and blocks until shutdown or server error.
+
+#### Worker runtime lifecycle
+
+1. `cmd/worker/main.go` checks whether the first argument is `init`.
+2. If `init` is present, `runInit` parses flags and calls `bootstrap.InitWorker`, then exits.
+3. Normal startup calls `logging.Configure("worker")`.
+4. `signal.NotifyContext` creates a cancellable root context.
+5. `config.LoadWorker` reads worker identity, master URL, cert path, heartbeat interval, and execution limits.
+6. `worker.NewWasmEngineWithLimits` creates a wazero runtime, compiled module cache, mutex, and execution semaphore.
+7. `WorkerServer` is constructed with the engine, node ID, and certificate directory.
+8. `StartTelemetry` runs in a goroutine, registering the worker with configured latitude/longitude and sending periodic CPU/RAM heartbeats over mTLS.
+9. `WorkerServer.Start` loads CA/worker certificates, starts an HTTPS server requiring client certificates, and blocks until shutdown or server error.
+
+#### Execution request lifecycle
+
+1. Client sends JSON to `POST /api/v1/execute` on the master.
+2. `Gateway.handleExecute` decodes `shared.ExecutionRequest` and calls `ExecutionRequest.Validate`.
+3. `Dispatcher.Dispatch` normalizes module URL fields.
+4. If the URL points at `*.azurecr.io`, the dispatcher:
+   - parses the ACR reference,
+   - mints an ACR bearer token,
+   - fetches the OCI manifest for manifest URLs,
+   - selects a WASM layer,
+   - rewrites the request to the layer blob URL.
+5. The dispatcher reads active workers from `Registry.GetActiveWorkers`.
+6. `Scheduler.SelectWorker` filters out workers below configured free CPU/RAM thresholds, then chooses the nearest remaining worker by latitude/longitude.
+7. `Dispatcher.forwardToWorker` sends the request to `https://<worker>/invoke` over mTLS.
+8. `WorkerServer.handleInvoke` limits request body size, decodes and validates the request, then calls `WasmEngine.Execute`.
+9. `WasmEngine.Execute` enforces payload and concurrency limits, fetches/compiles the module if needed, instantiates a fresh module instance, writes payload bytes into WASM memory, calls exported `run(ptr, len)`, reads output bytes, and returns a string.
+10. Worker returns `shared.ExecutionResponse`; master fills `ExecutedOnNodeID` and returns it to the client.
+
+## 2. Component & Module Breakdown
+
+### `cmd/master/main.go`
+
+- **Name & Responsibility:** Master process entrypoint. Handles `wasmcat-master init` and normal control-plane startup.
+- **State & Properties:** Local references to `MasterConfig`, `Registry`, `Scheduler`, `Dispatcher`, and `Gateway`; process root context; cleanup ticker.
+- **Interactions:** Calls `bootstrap.InitMaster`, `config.LoadMaster`, `security.GenerateCAAndCerts`, `master.NewRegistry`, `Gateway.Start`.
+
+### `cmd/worker/main.go`
+
+- **Name & Responsibility:** Worker process entrypoint. Handles `wasmcat-worker init` and normal worker runtime startup.
+- **State & Properties:** Local references to `WorkerConfig`, `WasmEngine`, `WorkerServer`; process root context.
+- **Interactions:** Calls `bootstrap.InitWorker`, `config.LoadWorker`, `worker.NewWasmEngineWithLimits`, `worker.StartTelemetry`, `WorkerServer.Start`.
+
+### `internal/bootstrap/bootstrap.go`
+
+- **Name & Responsibility:** Creates node configuration files and directories for native installation.
+- **State & Properties:** `MasterOptions`, `WorkerOptions`, and `Result` structs carry input flags and generated output locations.
+- **Interactions:** Writes `master.env` and `worker.env`; optionally calls `security.GenerateCAAndCerts`; uses `security.*Path` helpers for certificate naming.
+
+### `internal/config/config.go`
+
+- **Name & Responsibility:** Reads process configuration from environment variables and converts string inputs into typed values, including worker location and scheduler capacity thresholds.
+- **State & Properties:** `MasterConfig`, `WorkerConfig`, and `Limits` hold runtime settings.
+- **Interactions:** Used by both entrypoints before creating runtime components.
+
+### `internal/logging/logging.go`
+
+- **Name & Responsibility:** Configures JSON structured logging and logs HTTP request metadata.
+- **State & Properties:** `statusRecorder` wraps `http.ResponseWriter` and records final response status.
+- **Interactions:** `cmd/master` and `cmd/worker` set default `slog` loggers. HTTP servers wrap muxes with `logging.Middleware`.
+
+### `internal/security/mtls.go`
+
+- **Name & Responsibility:** Generates local development certificates and creates mTLS HTTP clients.
+- **State & Properties:** No long-lived package state. Certificate files are written to the configured cert directory.
+- **Interactions:** Master and worker servers load certificate paths from this package. Dispatcher and telemetry clients use mTLS client configuration.
+
+### `internal/shared/models.go`
+
+- **Name & Responsibility:** Defines JSON models shared by master and worker.
+- **State & Properties:** `WorkerNode`, `Heartbeat`, `ExecutionRequest`, `ExecutionResponse`, `APIResponse`, `ErrorResponse`, `HealthResponse`.
+- **Interactions:** All HTTP request/response handlers use these models.
+
+### `internal/shared/http.go`
+
+- **Name & Responsibility:** Standardizes JSON and error responses.
+- **State & Properties:** No internal state.
+- **Interactions:** Master and worker handlers call `WriteJSON` and `WriteError`.
+
+### `internal/master/gateway.go`
+
+- **Name & Responsibility:** Master HTTPS API server and request routing.
+- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`.
+- **Interactions:** Updates `Registry`, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
+
+### `internal/master/registry.go`
+
+- **Name & Responsibility:** In-memory worker registry.
+- **State & Properties:** `workers map[string]shared.WorkerNode` protected by `sync.RWMutex`.
+- **Interactions:** Gateway registration/heartbeat handlers mutate it; dispatcher reads active workers; master cleanup goroutine removes stale entries.
+
+### `internal/master/scheduler.go`
+
+- **Name & Responsibility:** Selects a worker for execution by capacity and distance.
+- **State & Properties:** `MinCPUFree`, `MinRAMFreeMB`; `EarthRadius` constant for Haversine distance.
+- **Interactions:** Dispatcher calls `Scheduler.SelectWorker`.
+
+### `internal/master/dispatcher.go`
+
+- **Name & Responsibility:** Coordinates execution dispatch from master to selected worker.
+- **State & Properties:** `Registry`, `Scheduler`, optional injected `Client`, and `CertDir`.
+- **Interactions:** Reads registry, calls scheduler, calls ACR helpers, creates mTLS client, forwards to worker `/invoke`.
+
+### `internal/master/acr_manifest.go`
+
+- **Name & Responsibility:** Parses ACR module references, fetches OCI manifests, selects WASM layers, and builds blob URLs.
+- **State & Properties:** `acrReference`, `ociManifest`, `ociLayer` model registry references and manifest data.
+- **Interactions:** `Dispatcher.Dispatch` uses this package before forwarding ACR-backed modules to workers.
+
+### `internal/master/acr_token.go`
+
+- **Name & Responsibility:** Mints repository-scoped ACR pull tokens using Azure identity and ACR OAuth exchange endpoints.
+- **State & Properties:** Response structs for refresh token and access token JSON.
+- **Interactions:** `Dispatcher.Dispatch` calls `GenerateACRToken` for ACR URLs.
+
+### `internal/worker/server.go`
+
+- **Name & Responsibility:** Worker HTTPS API server and invocation handler.
+- **State & Properties:** `WorkerServer.Engine`, `WorkerServer.NodeID`, `WorkerServer.CertDir`.
+- **Interactions:** Calls `WasmEngine.Execute`; serves health/readiness; uses mTLS server config.
+
+### `internal/worker/engine.go`
+
+- **Name & Responsibility:** Fetches, compiles, caches, instantiates, and executes WASM modules.
+- **State & Properties:** `wazero.Runtime`, compiled module cache, `sync.RWMutex`, `Limits`, and semaphore channel for concurrency.
+- **Interactions:** Worker invoke handler calls `Execute`; `FetchAndCache` downloads modules and compiles with wazero; memory helpers manage WASM memory.
+
+### `internal/worker/memory.go`
+
+- **Name & Responsibility:** Implements host-side memory operations for the project WASM ABI.
+- **State & Properties:** No package state.
+- **Interactions:** `WasmEngine.Execute` calls `WriteString` and `ReadString`; `WriteString` calls `Allocate`.
+
+### `internal/worker/limits.go`
+
+- **Name & Responsibility:** Defines worker-side resource limits and normalizes partial limit structs.
+- **State & Properties:** `DefaultLimits` and `Limits`.
+- **Interactions:** Config loading and worker engine creation use these values.
+
+### `internal/worker/telemetry.go`
+
+- **Name & Responsibility:** Registers workers with the master and sends heartbeat updates containing live CPU/RAM metrics.
+- **State & Properties:** Local ticker, mTLS HTTP client, configured worker coordinates, and `MetricsProvider`.
+- **Interactions:** Calls master `/internal/register` and `/internal/heartbeat` endpoints.
+
+### Packaging, CI, and release files
+
+- **`scripts/build.sh` / `scripts/build.ps1`:** Cross-compile native master/worker binaries, copy systemd/env templates, and write `checksums.txt`.
+- **`.github/workflows/ci.yml`:** Pull request and main branch quality gates.
+- **`.github/workflows/release.yml`:** Tag-triggered native release publishing.
+- **`packaging/systemd/*`:** Service and env templates for Linux hosts.
+- **`tests/*`:** Go tests live outside production package directories and cover config, bootstrap, gateway, dispatcher, worker server, limits, and engine behavior.
+
+## 3. Comprehensive API & Function Reference
+
+### Entrypoints
+
+#### `cmd/master/main.go`
+
+##### `func main()`
+
+- **Parameters:** None.
+- **Return Values:** None.
+- **Error Handling:** On `init` errors, writes `init failed: ...` to stderr and exits with status 1. On runtime startup errors, logs with `slog.Error` and returns from `main`.
+- **Side Effects:** Reads environment variables, may write local cert files when `AUTO_GENERATE_CERTS=true`, starts HTTPS server, starts registry cleanup goroutine, handles OS signals.
+
+##### `func runInit(args []string) error`
+
+- **Parameters:** `args []string` are CLI flags after `wasmcat-master init`.
+- **Return Values:** `error` only. Nil means config/cert directories and `master.env` were created successfully.
+- **Error Handling:** Returns flag parse errors and bootstrap validation/write errors.
+- **Side Effects:** Writes status lines to stdout through caller, creates directories/files through `bootstrap.InitMaster`.
+- **Flags:** `--config-dir`, `--cert-dir`, `--port`, `--cleanup-interval`, `--dev-worker-id`, `--dev-certs`, `--force`.
+
+##### `func defaultConfigDir() string`
+
+- **Parameters:** None.
+- **Return Values:** `C:\wasmcat` on Windows, `/etc/wasmcat` elsewhere.
+- **Error Handling:** None.
+- **Side Effects:** None.
+
+#### `cmd/worker/main.go`
+
+##### `func main()`
+
+- **Parameters:** None.
+- **Return Values:** None.
+- **Error Handling:** On `init` errors, writes to stderr and exits with status 1. Runtime errors are logged.
+- **Side Effects:** Reads environment variables, creates wazero runtime, starts telemetry goroutine, starts HTTPS worker server, handles OS signals.
+
+##### `func runInit(args []string) error`
+
+- **Parameters:** `args []string` are CLI flags after `wasmcat-worker init`.
+- **Return Values:** `error` only.
+- **Error Handling:** Returns flag parse errors, `--max-output-bytes` overflow, and bootstrap validation/write errors.
+- **Side Effects:** Creates directories and `worker.env`.
+- **Flags:** `--config-dir`, `--cert-dir`, `--worker-id`, `--port`, `--master-url`, `--advertise-address`, `--heartbeat-interval`, `--execution-timeout`, `--module-fetch-timeout`, `--max-module-bytes`, `--max-payload-bytes`, `--max-output-bytes`, `--max-concurrent-execs`, `--force`.
+
+##### `func defaultConfigDir() string`
+
+- Same behavior as master entrypoint.
+
+### Bootstrap package
+
+##### `func InitMaster(options MasterOptions) (Result, error)`
+
+- **Parameters:** `MasterOptions`:
+  - `ConfigDir string`: directory where `master.env` is written. Required after normalization.
+  - `CertDir string`: directory for certificates. Defaults to `<ConfigDir>/certs`.
+  - `Port string`: master HTTPS port. Defaults to `7270`.
+  - `CleanupInterval string`: duration string for registry cleanup ticker. Defaults to `15s`.
+  - `DevWorkerID string`: worker ID used when generating local dev certs. Defaults to `worker-vn-01`.
+  - `GenerateDevCerts bool`: when true, writes local CA/master/worker certs.
+  - `Force bool`: allows overwriting existing env or generated dev cert files.
+- **Return Values:** `Result{ConfigPath, CertDir, Warnings}`.
+- **Error Handling:** Returns errors for missing dirs, invalid duration, existing files without force, certificate generation failures, and file write failures.
+- **Side Effects:** Creates directories, writes `master.env`, optionally writes `ca.crt`, `ca.key`, `master.crt`, `master.key`, `worker-<id>.crt`, `worker-<id>.key`.
+
+##### `func InitWorker(options WorkerOptions) (Result, error)`
+
+- **Parameters:** `WorkerOptions`:
+  - `ConfigDir`, `CertDir`, `WorkerID`, `Port`, `MasterURL`, `AdvertiseAddress`.
+  - Duration strings: `HeartbeatInterval`, `ExecutionTimeout`, `ModuleFetchTimeout`.
+  - Numeric limits: `MaxModuleBytes`, `MaxPayloadBytes`, `MaxOutputBytes`, `MaxConcurrentExecs`.
+  - `Force bool`.
+- **Return Values:** `Result` pointing at `worker.env` and cert dir.
+- **Error Handling:** Returns errors for missing config, invalid HTTPS master URL, invalid duration strings, zero/negative limits, existing env file without force, and write failures.
+- **Side Effects:** Creates directories and writes `worker.env`.
+
+##### `func normalizeMaster(options MasterOptions) MasterOptions`
+
+- **Parameters:** Partial master options.
+- **Return Values:** Options with defaults applied.
+- **Error Handling:** None.
+- **Side Effects:** None.
+
+##### `func normalizeWorker(options WorkerOptions) WorkerOptions`
+
+- **Parameters:** Partial worker options.
+- **Return Values:** Options with string defaults applied. Numeric limits must be supplied by the CLI or caller.
+- **Error Handling:** None.
+- **Side Effects:** None.
+
+##### `func validateMaster(options MasterOptions) error`
+
+- **Parameters:** Normalized master options.
+- **Return Values:** Nil on valid input.
+- **Error Handling:** Missing config dir, cert dir, port, dev worker ID, or invalid cleanup duration.
+- **Side Effects:** None.
+
+##### `func validateWorker(options WorkerOptions) error`
+
+- **Parameters:** Normalized worker options.
+- **Return Values:** Nil on valid input.
+- **Error Handling:** Missing required strings, non-HTTPS master URL, invalid duration strings, non-positive numeric limits.
+- **Side Effects:** None.
+
+##### `func validateURL(value string) error`
+
+- **Parameters:** URL string.
+- **Return Values:** Nil if URL has `https` scheme and host.
+- **Error Handling:** URL parse errors or non-HTTPS/missing-host errors.
+- **Side Effects:** None.
+
+##### `func ensureDevCertTargetsCanBeWritten(certDir string, workerID string, force bool) error`
+
+- **Parameters:** Certificate directory, worker ID, overwrite flag.
+- **Return Values:** Nil if cert generation may proceed.
+- **Error Handling:** Existing target files without `force`; filesystem stat failures.
+- **Side Effects:** Reads filesystem metadata.
+
+##### `func writeEnvFile(path string, values []envValue, force bool) error`
+
+- **Parameters:** Output path, name/value pairs, overwrite flag.
+- **Return Values:** Nil on successful write.
+- **Error Handling:** Existing file without force, stat errors, write errors.
+- **Side Effects:** Writes an env file with `0644` permissions.
+
+### Config package
+
+##### `func LoadMaster() (MasterConfig, error)`
+
+- **Parameters:** None.
+- **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `MinWorkerCPUFree`, and `MinWorkerRAMFreeMB`.
+- **Error Handling:** Invalid `CLEANUP_INTERVAL`, `AUTO_GENERATE_CERTS`, `MIN_WORKER_CPU_FREE`, or `MIN_WORKER_RAM_FREE_MB`.
+- **Side Effects:** Reads process environment.
+
+##### `func LoadWorker() (WorkerConfig, error)`
+
+- **Parameters:** None.
+- **Return Values:** `WorkerConfig` with port, node ID, master URL, advertise address, worker coordinates, cert dir, heartbeat interval, and limits.
+- **Error Handling:** Invalid duration, coordinate, or numeric limit environment variables.
+- **Side Effects:** Reads process environment.
+
+##### `func loadWorkerLimits() (Limits, error)`
+
+- **Parameters:** None.
+- **Return Values:** `Limits`.
+- **Error Handling:** Invalid `EXECUTION_TIMEOUT`, `MODULE_FETCH_TIMEOUT`, `MAX_MODULE_BYTES`, `MAX_PAYLOAD_BYTES`, `MAX_OUTPUT_BYTES`, or `MAX_CONCURRENT_EXECS`.
+- **Side Effects:** Reads process environment.
+
+##### `func stringEnv(name string, fallback string) string`
+
+- **Parameters:** Env var name and fallback.
+- **Return Values:** Env value or fallback when empty.
+- **Error Handling:** None.
+- **Side Effects:** Reads process environment.
+
+##### `func durationEnv(name string, fallback time.Duration) (time.Duration, error)`
+
+- **Parameters:** Env var name and fallback.
+- **Return Values:** Parsed `time.Duration`.
+- **Error Handling:** `time.ParseDuration` failures.
+- **Side Effects:** Reads process environment.
+
+##### `func boolEnv(name string, fallback bool) (bool, error)`
+
+- **Parameters:** Env var name and fallback.
+- **Return Values:** Parsed boolean.
+- **Error Handling:** `strconv.ParseBool` failures.
+- **Side Effects:** Reads process environment.
+
+##### `func intEnv(name string, fallback int) (int, error)`
+
+- **Parameters:** Env var name and fallback.
+- **Return Values:** Parsed int.
+- **Error Handling:** `strconv.Atoi` failures.
+- **Side Effects:** Reads process environment.
+
+##### `func int64Env(name string, fallback int64) (int64, error)`
+
+- **Parameters:** Env var name and fallback.
+- **Return Values:** Parsed int64.
+- **Error Handling:** `strconv.ParseInt` failures.
+- **Side Effects:** Reads process environment.
+
+##### `func uint32Env(name string, fallback uint32) (uint32, error)`
+
+- **Parameters:** Env var name and fallback.
+- **Return Values:** Parsed uint32.
+- **Error Handling:** `strconv.ParseUint` failures or overflow beyond 32 bits.
+- **Side Effects:** Reads process environment.
+
+### Security package
+
+##### `func GenerateCAAndCerts(certDir string, workerID string) error`
+
+- **Parameters:** `certDir` output directory; `workerID` used in worker cert filename and common name.
+- **Return Values:** Nil on success.
+- **Error Handling:** Missing inputs, mkdir failure, RSA generation failure, certificate creation/parse failures, file write failures.
+- **Side Effects:** Writes CA private key and certificates. Uses `os.Create`, so existing files are overwritten.
+
+##### `func CACertPath(certDir string) string`
+
+- **Return Values:** `<certDir>/ca.crt`.
+
+##### `func MasterCertPath(certDir string) string`
+
+- **Return Values:** `<certDir>/master.crt`.
+
+##### `func MasterKeyPath(certDir string) string`
+
+- **Return Values:** `<certDir>/master.key`.
+
+##### `func WorkerCertPath(certDir string, workerID string) string`
+
+- **Return Values:** `<certDir>/worker-<workerID>.crt`.
+
+##### `func WorkerKeyPath(certDir string, workerID string) string`
+
+- **Return Values:** `<certDir>/worker-<workerID>.key`.
+
+##### `func generateLeafCert(certPath string, keyPath string, caCert *x509.Certificate, caKey *rsa.PrivateKey, commonName string, addLocalSANs bool) error`
+
+- **Parameters:** Output cert/key paths, CA cert/key, leaf common name, SAN toggle.
+- **Return Values:** Nil on success.
+- **Error Handling:** RSA generation, x509 creation, and file write failures.
+- **Side Effects:** Writes certificate and key files.
+
+##### `func writeCertificate(path string, derBytes []byte) error`
+
+- **Parameters:** Output path and DER certificate bytes.
+- **Return Values:** Nil on successful PEM write.
+- **Error Handling:** File create or PEM encode failures.
+- **Side Effects:** Creates or truncates certificate file.
+
+##### `func writePrivateKey(path string, key *rsa.PrivateKey) error`
+
+- **Parameters:** Output path and RSA private key.
+- **Return Values:** Nil on successful PEM write.
+- **Error Handling:** File create or PEM encode failures.
+- **Side Effects:** Creates or truncates key file.
+
+##### `func randomSerialNumber() *big.Int`
+
+- **Return Values:** Random 128-bit serial number.
+- **Error Handling:** Panics if crypto random generation fails.
+- **Side Effects:** Reads from cryptographic randomness.
+
+##### `func NewMTLSHTTPClient(certFile string, keyFile string, caFile string) (*http.Client, error)`
+
+- **Parameters:** Client cert path, client key path, CA cert path.
+- **Return Values:** HTTP client with TLS client cert, root CA pool, and TLS 1.2 minimum.
+- **Error Handling:** Cert/key load failures, CA read failures, CA parse failures.
+- **Side Effects:** Reads certificate files.
+
+### Logging package
+
+##### `func Configure(component string) *slog.Logger`
+
+- **Parameters:** Component name added to all log records.
+- **Return Values:** Configured JSON `slog.Logger`.
+- **Error Handling:** None.
+- **Side Effects:** Sets global default `slog` logger and writes future logs to stdout.
+
+##### `func Middleware(component string, next http.Handler) http.Handler`
+
+- **Parameters:** Component label and downstream handler.
+- **Return Values:** HTTP handler wrapper.
+- **Error Handling:** Does not recover panics.
+- **Side Effects:** Logs method, path, status, and duration after each request.
+
+##### `func (r *statusRecorder) WriteHeader(status int)`
+
+- **Parameters:** HTTP status code.
+- **Return Values:** None.
+- **Side Effects:** Records status and forwards header write.
+
+### Shared package
+
+##### `func (r ExecutionRequest) Validate() error`
+
+- **Parameters:** Receiver containing `ModuleName`, `ModuleURL`, and `ModuleRegistryURL`.
+- **Return Values:** Nil when `ModuleName` is set and either module URL field is present.
+- **Error Handling:** Returns missing field errors.
+- **Side Effects:** None.
+
+##### `func WriteJSON(w http.ResponseWriter, status int, value any)`
+
+- **Parameters:** Response writer, HTTP status, value to encode.
+- **Return Values:** None.
+- **Error Handling:** If JSON encoding fails after headers are written, calls `http.Error`; status may already be committed.
+- **Side Effects:** Writes HTTP headers and response body.
+
+##### `func WriteError(w http.ResponseWriter, status int, code string, err error)`
+
+- **Parameters:** Response writer, HTTP status, machine-readable code, error.
+- **Return Values:** None.
+- **Error Handling:** Nil `err` produces an empty error message.
+- **Side Effects:** Writes JSON error response.
+
+### Master package
+
+##### `func NewGateway(reg *Registry) *Gateway`
+
+- **Parameters:** Registry pointer.
+- **Return Values:** Gateway with registry set.
+- **Error Handling:** None.
+- **Side Effects:** None.
+
+##### `func (g *Gateway) Handler() http.Handler`
+
+- **Return Values:** HTTP handler with master routes wrapped by logging middleware.
+- **Routes:** `/wasmcat/health`, `/wasmcat/ready`, `/internal/register`, `/internal/heartbeat`, `/api/v1/execute`.
+- **Side Effects:** None until the returned handler is used.
+
+##### `func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request)`
+
+- **Return Values:** JSON `HealthResponse{Status:"ok", Role:"master"}`.
+- **Error Handling:** JSON write errors handled by `WriteJSON`.
+- **Side Effects:** Writes HTTP response.
+
+##### `func (g *Gateway) handleReady(w http.ResponseWriter, r *http.Request)`
+
+- **Return Values:** 200 ready response if registry, dispatcher, and scheduler exist.
+- **Error Handling:** 503 `not_ready` when dependencies are nil.
+- **Side Effects:** Writes HTTP response.
+
+##### `func (g *Gateway) handleRegister(w http.ResponseWriter, r *http.Request)`
+
+- **Parameters:** JSON `shared.WorkerNode` in request body.
+- **Return Values:** 200 `APIResponse`.
+- **Error Handling:** 400 invalid JSON. No explicit method check.
+- **Side Effects:** Mutates registry.
+
+##### `func (g *Gateway) handleHeartbeat(w http.ResponseWriter, r *http.Request)`
+
+- **Parameters:** JSON `shared.Heartbeat`.
+- **Return Values:** 200 empty body on success.
+- **Error Handling:** 400 invalid JSON; 404 unknown worker.
+- **Side Effects:** Updates registry CPU/RAM/LastSeen.
+
+##### `func (g *Gateway) Start(ctx context.Context, port string) error`
+
+- **Parameters:** Shutdown context and listen port string.
+- **Return Values:** Nil on clean shutdown.
+- **Error Handling:** CA/cert read errors, TLS server errors, shutdown errors.
+- **Side Effects:** Starts HTTPS server requiring client certificates.
+
+##### `func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request)`
+
+- **Parameters:** JSON `shared.ExecutionRequest`.
+- **Return Values:** 200 `ExecutionResponse` on success.
+- **Error Handling:** 400 invalid JSON or validation failure; 503 dispatch failure.
+- **Side Effects:** Triggers scheduling, ACR network calls, and worker network call.
+
+##### `func NewRegistry() *Registry`
+
+- **Return Values:** Registry with initialized worker map.
+- **Side Effects:** Allocates in-memory map.
+
+##### `func (r *Registry) RegisterWorker(worker shared.WorkerNode)`
+
+- **Parameters:** Worker node record.
+- **Return Values:** None.
+- **Error Handling:** None.
+- **Side Effects:** Locks registry, sets `LastSeen` if zero, stores worker by ID, logs registration.
+
+##### `func RegisterNode(registry *Registry, worker shared.WorkerNode)`
+
+- **Parameters:** Registry pointer and worker node.
+- **Return Values:** None.
+- **Side Effects:** Calls `RegisterWorker`.
+
+##### `func (r *Registry) UpdateWorkerStatus(heartbeat shared.Heartbeat) error`
+
+- **Parameters:** Heartbeat with node ID and resource values.
+- **Return Values:** Nil when worker exists.
+- **Error Handling:** Unknown worker ID.
+- **Side Effects:** Mutates worker CPU, RAM, LastSeen.
+
+##### `func (r *Registry) GetActiveWorkers() []shared.WorkerNode`
+
+- **Return Values:** Snapshot slice of all registered workers.
+- **Error Handling:** None.
+- **Side Effects:** Acquires read lock.
+
+##### `func (r *Registry) Cleanup()`
+
+- **Return Values:** None.
+- **Side Effects:** Deletes workers whose `LastSeen` is older than 30 seconds.
+
+##### `func (s *Scheduler) SelectWorker(userLat, userLon float64, workers []shared.WorkerNode) (shared.WorkerNode, error)`
+
+- **Parameters:** User coordinates and active worker slice.
+- **Return Values:** Closest worker that meets `MinCPUFree` and `MinRAMFreeMB`.
+- **Error Handling:** Empty worker list or no worker meeting capacity thresholds.
+- **Side Effects:** None.
+
+##### `func FilterWorkersByCapacity(workers []shared.WorkerNode, minCPUFree float64, minRAMFreeMB float64) []shared.WorkerNode`
+
+- **Parameters:** Worker slice and minimum free CPU/RAM thresholds.
+- **Return Values:** Workers whose `CPUFree >= minCPUFree` and `RAMFreeMB >= minRAMFreeMB`.
+- **Error Handling:** None.
+- **Side Effects:** None.
+
+##### `func FindClosestWorker(userLat, userLon float64, workers []shared.WorkerNode) (shared.WorkerNode, error)`
+
+- Same behavior as `SelectWorker`; iterates all workers and calculates Haversine distance.
+
+##### `func calculateHaversine(lat1, lon1, lat2, lon2 float64) float64`
+
+- **Return Values:** Distance in kilometers.
+- **Error Handling:** None.
+- **Side Effects:** None.
+
+##### `func degreesToRadians(degrees float64) float64`
+
+- **Return Values:** Radian equivalent.
+
+##### `func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) (shared.ExecutionResponse, error)`
+
+- **Parameters:** Request context and execution request.
+- **Return Values:** Worker execution response.
+- **Error Handling:** ACR parse/token/manifest errors, no active workers, scheduler errors, worker forwarding errors.
+- **Side Effects:** May call Azure identity/ACR endpoints, reads registry, sends mTLS HTTP request to worker, logs dispatch events.
+
+##### `func (d *Dispatcher) forwardToWorker(ctx context.Context, node shared.WorkerNode, req shared.ExecutionRequest) (shared.ExecutionResponse, error)`
+
+- **Parameters:** Context, selected worker, execution request.
+- **Return Values:** Decoded worker response with `ExecutedOnNodeID` set.
+- **Error Handling:** JSON marshal, mTLS client creation, request creation, network failure, non-2xx worker response, JSON decode failure.
+- **Side Effects:** Network I/O to worker.
+
+##### `func workerInvokeURL(address string) string`
+
+- **Parameters:** Worker address with or without scheme.
+- **Return Values:** HTTPS invoke URL ending in `/invoke`.
+- **Error Handling:** None.
+- **Side Effects:** None.
+
+### ACR functions
+
+##### `func ParseACRModuleReference(moduleRegistryURL string) (ACRReference, error)`
+
+- Public wrapper around `parseACRModuleReference`.
+
+##### `func parseACRModuleReference(moduleRegistryURL string) (acrReference, error)`
+
+- **Parameters:** ACR registry, manifest, blob, tag, or referrer URL.
+- **Return Values:** Registry name, repository name, optional reference, and reference kind.
+- **Error Handling:** Invalid URL, non-ACR host, missing repository, missing reference.
+- **Side Effects:** None.
+
+##### `func parseACRReference(moduleRegistryURL string) (string, string, error)`
+
+- **Return Values:** Registry name and repository name for legacy callers.
+- **Error Handling:** Same as parser.
+
+##### `func resolveACRModuleURL(ctx context.Context, moduleRegistryURL string, token string, ref acrReference) (string, error)`
+
+- **Return Values:** Original URL for non-manifest references, or layer blob URL for manifest references.
+- **Error Handling:** Manifest fetch, layer selection, blob URL build errors.
+- **Side Effects:** Network I/O for manifest references.
+
+##### `func FetchACRManifest(ctx context.Context, manifestURL string, token string) (OCIManifest, error)`
+
+- Public wrapper around `fetchACRManifest`.
+
+##### `func fetchACRManifest(ctx context.Context, manifestURL string, token string) (ociManifest, error)`
+
+- **Parameters:** Context, ACR manifest URL, bearer token.
+- **Return Values:** Decoded OCI manifest.
+- **Error Handling:** Request creation, network errors, non-200 status, JSON decode failures, empty layer list.
+- **Side Effects:** HTTP GET with `Authorization: Bearer <token>`.
+
+##### `func SelectWASMLayer(manifest OCIManifest) (OCILayer, error)`
+
+- Public wrapper around `selectWASMLayer`.
+
+##### `func selectWASMLayer(manifest ociManifest) (ociLayer, error)`
+
+- **Return Values:** Single layer if only one exists, otherwise first known WASM media type.
+- **Error Handling:** Empty manifest or multiple layers without known WASM media type.
+- **Side Effects:** None.
+
+##### `func isWASMLayerMediaType(mediaType string) bool`
+
+- **Return Values:** True for `application/wasm`, `application/vnd.module.wasm.content.layer.v1+wasm`, or `application/vnd.wasm.content.layer.v1+wasm`.
+
+##### `func BuildACRBlobURL(originalURL string, repositoryName string, digest string) (string, error)`
+
+- Public wrapper around `buildACRBlobURL`.
+
+##### `func buildACRBlobURL(originalURL string, repositoryName string, digest string) (string, error)`
+
+- **Return Values:** `/v2/<repository>/blobs/<sha256:digest>` URL on same ACR host.
+- **Error Handling:** Missing repository, digest not starting with `sha256:`, invalid URL, non-ACR host.
+- **Side Effects:** None.
+
+##### `func GenerateACRToken(ctx context.Context, registryName string, repositoryName string) (string, error)`
+
+- **Parameters:** Azure registry name without `.azurecr.io`, repository name.
+- **Return Values:** Repository-scoped ACR pull access token.
+- **Error Handling:** Missing inputs, Azure credential creation, AAD token acquisition, JWT tenant extraction, exchange/token endpoint failures.
+- **Side Effects:** Uses Azure DefaultAzureCredential chain and network calls.
+
+##### `func exchangeAADTokenForRefreshToken(ctx context.Context, service string, tenantID string, aadToken string) (string, error)`
+
+- **Return Values:** ACR refresh token.
+- **Error Handling:** Request creation, network errors, non-200 status with body, JSON decode errors, missing `refresh_token`.
+- **Side Effects:** HTTP POST to `https://<service>/oauth2/exchange`.
+
+##### `func exchangeRefreshTokenForAccessToken(ctx context.Context, service string, repositoryName string, refreshToken string) (string, error)`
+
+- **Return Values:** ACR access token scoped to `repository:<repositoryName>:pull`.
+- **Error Handling:** Request creation, network errors, non-200 status with body, JSON decode errors, missing `access_token`.
+- **Side Effects:** HTTP POST to `https://<service>/oauth2/token`.
+
+##### `func extractTenantID(jwtToken string) (string, error)`
+
+- **Return Values:** `tid` claim from JWT payload.
+- **Error Handling:** Invalid JWT format, base64 decode failure, JSON unmarshal failure, missing tenant ID.
+- **Side Effects:** None.
+
+### Worker package
+
+##### `func (s *WorkerServer) Handler() http.Handler`
+
+- **Return Values:** HTTP handler with `/wasmcat/health`, `/wasmcat/ready`, and `/invoke`.
+- **Side Effects:** None until served.
+
+##### `func (s *WorkerServer) handleHealth(w http.ResponseWriter, r *http.Request)`
+
+- **Return Values:** JSON health response with node ID and role.
+- **Side Effects:** Writes HTTP response.
+
+##### `func (s *WorkerServer) handleReady(w http.ResponseWriter, r *http.Request)`
+
+- **Return Values:** 200 if `Engine` exists.
+- **Error Handling:** 503 `not_ready` if engine is nil.
+- **Side Effects:** Writes HTTP response.
+
+##### `func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request)`
+
+- **Parameters:** JSON execution request.
+- **Return Values:** JSON execution response with `Result`.
+- **Error Handling:** 400 invalid body/validation failure/execution failure.
+- **Side Effects:** Applies HTTP body limit, executes module through engine.
+
+##### `func (s *WorkerServer) Start(ctx context.Context, port string) error`
+
+- **Parameters:** Shutdown context and port.
+- **Return Values:** Nil on clean shutdown.
+- **Error Handling:** CA/cert load failures, TLS server errors, shutdown errors.
+- **Side Effects:** Starts HTTPS server requiring client certificates.
+
+##### `func NewWasmEngine(ctx context.Context) *WasmEngine`
+
+- **Parameters:** Runtime context.
+- **Return Values:** Engine using `DefaultLimits`.
+- **Side Effects:** Creates wazero runtime and cache.
+
+##### `func NewWasmEngineWithLimits(ctx context.Context, limits Limits) *WasmEngine`
+
+- **Parameters:** Runtime context and limits.
+- **Return Values:** Engine with normalized limits.
+- **Side Effects:** Creates wazero runtime configured with `WithCloseOnContextDone(true)`, cache map, mutex, and semaphore.
+
+##### `func (e *WasmEngine) Limits() Limits`
+
+- **Return Values:** Engine limits.
+- **Side Effects:** None.
+
+##### `func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL string, bearerToken string) error`
+
+- **Parameters:** Module cache key, module URL, optional bearer token.
+- **Return Values:** Nil if module is already cached or fetched and compiled.
+- **Error Handling:** Missing URL on cache miss, request creation, network errors, non-200 status, read errors, module too large, wazero compile errors.
+- **Side Effects:** HTTP GET module bytes, optional Authorization header, compiles WASM, mutates cache.
+
+##### `func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL string, payload string, bearerToken string) (result string, err error)`
+
+- **Parameters:** Module cache key, URL, input payload string, optional bearer token.
+- **Return Values:** WASM output string.
+- **Error Handling:** Payload too large, capacity exhausted, context cancellation, fetch/compile errors, missing cache entry, instantiate errors, memory write/read errors, missing `run`, `run` call failure, empty result, output too large.
+- **Side Effects:** May download/compile/cache module, instantiate module, call WASM code, log execution events.
+
+##### `func Allocate(ctx context.Context, mod api.Module, size uint32) (uint32, error)`
+
+- **Parameters:** Wazero module instance and byte size.
+- **Return Values:** Pointer returned from module-exported `malloc`.
+- **Error Handling:** Missing `malloc`, call error, empty return.
+- **Side Effects:** Calls WASM code.
+
+##### `func WriteString(ctx context.Context, mod api.Module, input string) (uint32, error)`
+
+- **Parameters:** Module instance and input string.
+- **Return Values:** Pointer where bytes were written.
+- **Error Handling:** Allocation error, missing memory export, failed memory write.
+- **Side Effects:** Writes payload bytes into WASM linear memory.
+
+##### `func ReadString(mod api.Module, ptr uint32, length uint32) (string, error)`
+
+- **Parameters:** Module instance, output pointer, output length.
+- **Return Values:** String copied from WASM memory.
+- **Error Handling:** Missing memory export or out-of-bounds read.
+- **Side Effects:** Reads WASM linear memory.
+
+##### `func normalizeLimits(limits Limits) Limits`
+
+- **Parameters:** Possibly partial limits.
+- **Return Values:** Limits with defaults filled for non-positive values.
+- **Error Handling:** None.
+- **Side Effects:** None.
+
+##### `func StartTelemetry(ctx context.Context, masterURL string, nodeID string, workerAddress string, latitude float64, longitude float64, interval time.Duration, certDir string)`
+
+- **Parameters:** Cancellation context, master URL, worker ID, advertised address, worker coordinates, heartbeat interval, cert directory.
+- **Return Values:** None.
+- **Error Handling:** Logs mTLS client init failure and returns; register/heartbeat failures are logged and retried on next tick.
+- **Side Effects:** Creates mTLS client; POSTs registration and heartbeat requests until context cancellation.
+
+##### `func StartTelemetryWithMetrics(ctx context.Context, masterURL string, nodeID string, workerAddress string, latitude float64, longitude float64, interval time.Duration, certDir string, metricsProvider MetricsProvider)`
+
+- **Parameters:** Same runtime telemetry inputs plus an injectable metrics provider.
+- **Return Values:** None.
+- **Error Handling:** Same as `StartTelemetry`; metric snapshot failures are logged and skip that heartbeat.
+- **Side Effects:** Same network side effects as `StartTelemetry`.
+
+##### `func (p SystemMetricsProvider) Snapshot(ctx context.Context) (NodeMetrics, error)`
+
+- **Parameters:** Context used by gopsutil CPU and memory reads.
+- **Return Values:** `NodeMetrics` with free CPU percentage and available RAM in MiB.
+- **Error Handling:** CPU sampling errors, missing CPU samples, memory read errors.
+- **Side Effects:** Reads host CPU and memory state.
+
+##### `func newMTLSClient(certDir string, nodeID string) (*http.Client, error)`
+
+- **Return Values:** Worker-authenticated HTTP client.
+- **Error Handling:** Cert/key load, CA read, CA parse errors.
+- **Side Effects:** Reads certificate files.
+
+##### `func registerWorker(client *http.Client, masterURL string, nodeID string, workerAddress string, latitude float64, longitude float64)`
+
+- **Parameters:** mTLS client, master URL, worker ID, advertised worker address, worker latitude, worker longitude.
+- **Return Values:** None.
+- **Error Handling:** Logs marshal, request creation, network, and rejection errors.
+- **Side Effects:** HTTP POST to master `/internal/register`.
+
+##### `func sendHeartbeat(ctx context.Context, client *http.Client, masterURL string, nodeID string, metricsProvider MetricsProvider)`
+
+- **Parameters:** Context, mTLS client, master URL, worker ID, metrics provider.
+- **Return Values:** None.
+- **Error Handling:** Logs metric snapshot, marshal, request creation, network, and rejection errors.
+- **Side Effects:** HTTP POST to master `/internal/heartbeat`.
+
+## 4. Configuration, Environment, & Dependencies
+
+### External Dependencies
+
+- **Go toolchain:** `go 1.26.2` as declared in `go.mod`.
+- **wazero `github.com/tetratelabs/wazero v1.11.0`:** Embedded WASM runtime, module compilation, instantiation, memory access, and function calls.
+- **Azure SDK `github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1`:** Default Azure credential chain for ACR token generation.
+- **Azure SDK `github.com/Azure/azure-sdk-for-go/sdk/azcore v1.20.0`:** Token request policy types.
+- **gopsutil `github.com/shirou/gopsutil/v4`:** Worker host CPU and memory telemetry.
+- **Go standard library:** HTTP servers/clients, TLS/x509, JSON, context, sync, time, crypto, logging.
+- **Azure Container Registry API:** ACR OAuth exchange/token endpoints and OCI registry manifest/blob endpoints.
+- **systemd:** Optional but documented Linux service manager for production hosts.
+
+### Master Environment Variables
+
+| Variable | Default | Format | Purpose |
+| --- | --- | --- | --- |
+| `MASTER_PORT` | `7270` | TCP port string | HTTPS listen port for master gateway. |
+| `CERT_DIR` | `./certs` | Filesystem path | Directory containing `ca.crt`, `master.crt`, and `master.key`. |
+| `AUTO_GENERATE_CERTS` | `true` | Go boolean string | When true, master startup writes local development certs. Set false in production. |
+| `DEV_WORKER_ID` | `worker-vn-01` | string | Worker ID used for local dev cert generation. |
+| `CLEANUP_INTERVAL` | `15s` | Go duration | Frequency for registry cleanup ticker. Cleanup removes workers older than 30 seconds. |
+| `MIN_WORKER_CPU_FREE` | `0` | float percentage | Minimum reported free CPU required before the scheduler can select a worker. |
+| `MIN_WORKER_RAM_FREE_MB` | `0` | float MiB | Minimum reported free RAM required before the scheduler can select a worker. |
+
+### Worker Environment Variables
+
+| Variable | Default | Format | Purpose |
+| --- | --- | --- | --- |
+| `WORKER_ID` | `worker-vn-01` | string | Stable worker node ID and certificate filename suffix. |
+| `WORKER_PORT` | `7271` | TCP port string | HTTPS listen port for worker invocation server. |
+| `MASTER_URL` | `https://localhost:7270` | HTTPS URL | Master gateway URL used by telemetry. |
+| `WORKER_ADVERTISE_ADDRESS` | `localhost:<WORKER_PORT>` | host:port or URL | Address stored in registry and used by master dispatch. |
+| `WORKER_LATITUDE` | `0` | float degrees, `-90` to `90` | Worker latitude stored during registration and used for distance scheduling. |
+| `WORKER_LONGITUDE` | `0` | float degrees, `-180` to `180` | Worker longitude stored during registration and used for distance scheduling. |
+| `CERT_DIR` | `./certs` | Filesystem path | Directory containing `ca.crt`, `worker-<id>.crt`, and `worker-<id>.key`. |
+| `HEARTBEAT_INTERVAL` | `5s` | Go duration | Interval for worker registration and heartbeat loop. |
+| `EXECUTION_TIMEOUT` | `5s` | Go duration | Full worker execution path timeout. |
+| `MODULE_FETCH_TIMEOUT` | `10s` | Go duration | Module download/compile timeout. |
+| `MAX_MODULE_BYTES` | `10485760` | integer bytes | Maximum downloaded WASM module size. |
+| `MAX_PAYLOAD_BYTES` | `1048576` | integer bytes | Maximum payload size before execution. |
+| `MAX_OUTPUT_BYTES` | `1048576` | uint32 bytes | Maximum output bytes read from WASM memory. |
+| `MAX_CONCURRENT_EXECS` | `4` | integer | Worker-local execution concurrency limit. |
+
+### Init Command Configuration
+
+#### Master
+
+```bash
+wasmcat-master init \
+  --config-dir /etc/wasmcat \
+  --cert-dir /etc/wasmcat/certs \
+  --port 7270 \
+  --cleanup-interval 15s \
+  --dev-worker-id worker-vn-01
+```
+
+`--dev-certs` generates local development certificates. `--force` overwrites existing generated files.
+
+#### Worker
+
+```bash
+wasmcat-worker init \
+  --worker-id worker-us-01 \
+  --master-url https://master.example.com:7270 \
+  --advertise-address worker-us-01.example.com:7271 \
+  --config-dir /etc/wasmcat \
+  --cert-dir /etc/wasmcat/certs
+```
+
+Worker init validates that `--master-url` is HTTPS and that numeric limits are positive.
+
+### HTTP API Surface
+
+All runtime endpoints are served over HTTPS with mTLS enabled.
+
+| Component | Endpoint | Expected Body | Success Response | Failure Modes |
+| --- | --- | --- | --- | --- |
+| Master | `/wasmcat/health` | none | `HealthResponse` | JSON encode failure only. |
+| Master | `/wasmcat/ready` | none | `HealthResponse` | 503 if registry, dispatcher, or scheduler is nil. |
+| Master | `/internal/register` | `WorkerNode` | `APIResponse` | 400 invalid JSON. |
+| Master | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 400 invalid JSON, 404 unknown worker. |
+| Master | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 400 invalid JSON/request, 503 dispatch failure. |
+| Worker | `/wasmcat/health` | none | `HealthResponse` | JSON encode failure only. |
+| Worker | `/wasmcat/ready` | none | `HealthResponse` | 503 if engine is nil. |
+| Worker | `/invoke` | `ExecutionRequest` | `ExecutionResponse` | 400 invalid JSON/request/execution failure. |
+
+The handlers do not currently enforce HTTP methods. Operational clients should still use the intended methods: `GET` for health/readiness and `POST` for registration, heartbeat, execute, and invoke.
+
+### WASM Module ABI
+
+Each WASM module must export:
+
+```text
+memory
+malloc(size uint32) uint32
+run(ptr uint32, len uint32) uint64
+```
+
+The host writes the request payload into module memory at the pointer returned by `malloc`. The `run` function receives input pointer and length. Its `uint64` return packs output pointer and output length:
+
+```text
+output_ptr = uint32(result >> 32)
+output_len = uint32(result)
+```
+
+## 5. Deployment & Operational Considerations
+
+### Prerequisites
+
+- Native release binaries from GitHub Releases or a local source build.
+- Host OS with network access between master and workers.
+- TLS certificate set:
+  - Master: `ca.crt`, `master.crt`, `master.key`.
+  - Worker: `ca.crt`, `worker-<WORKER_ID>.crt`, `worker-<WORKER_ID>.key`.
+- Azure credentials on the master host if using ACR module references. The Azure SDK DefaultAzureCredential chain must resolve an identity authorized to pull repository content.
+- systemd for the provided Linux service templates.
+- No container runtime is required.
+
+### Deployment Flow
+
+1. Download release assets and verify `checksums.txt`.
+2. Install `wasmcat-master` or `wasmcat-worker` into `/usr/local/bin`.
+3. Run `wasmcat-master init` or `wasmcat-worker init`.
+4. Provide production certificates in `CERT_DIR`.
+5. Install the systemd service file.
+6. Start service with `systemctl enable --now`.
+7. Verify `/wasmcat/health` and `/wasmcat/ready` with an mTLS-capable client.
+
+### Concurrency and Thread Safety
+
+- `Registry` is protected by `sync.RWMutex` for concurrent registration, heartbeat, cleanup, and dispatch reads.
+- `WasmEngine.cache` is protected by `sync.RWMutex`.
+- Worker execution concurrency is capped by `WasmEngine.sem`, a buffered channel sized to `MaxConcurrentExecs`.
+- Each execution instantiates a fresh WASM module instance, so request memory is not shared between invocations.
+- The compiled module cache is process-local and has no eviction policy.
+
+### Edge Cases and Limitations
+
+- **Worker coordinates default to zero:** Operators must set `WORKER_LATITUDE` and `WORKER_LONGITUDE`; otherwise workers appear at `0,0`.
+- **Capacity thresholds are opt-in:** Defaults are zero, so every worker remains eligible unless operators set `MIN_WORKER_CPU_FREE` or `MIN_WORKER_RAM_FREE_MB`.
+- **Registry cleanup age is fixed:** `Registry.Cleanup` removes nodes older than 30 seconds. `CLEANUP_INTERVAL` controls how often cleanup runs, not the expiration age.
+- **ACR token generation is uncached:** Each ACR dispatch can perform Azure credential lookup and token exchange.
+- **HTTP clients generally rely on context cancellation:** Dispatcher and ACR clients do not set explicit `http.Client.Timeout`; callers must provide bounded contexts.
+- **Module cache key is `moduleName`:** If the same `moduleName` points to a new URL or digest, the worker keeps using the cached compiled module until restart.
+- **No module cache eviction:** Compiled modules can accumulate for the life of the worker process.
+- **Duplicate fetch race:** Two concurrent first-time requests for the same module can both download and compile; only one compiled module is stored.
+- **Execution time field is not populated:** `ExecutionResponse.ExecutionTimeMs` exists but worker currently returns only `Result`; dispatcher logs duration separately.
+- **Health/readiness require mTLS:** Because TLS client auth is configured at server level, probes must present valid client certificates unless TLS routing changes.
+- **Worker invoke nil engine risk:** Readiness checks for nil engine, but `/invoke` accesses `s.Engine.Limits()` before a nil check. Normal startup always sets the engine.
+- **Development cert generation overwrites at runtime:** `GenerateCAAndCerts` uses `os.Create`. Production should set `AUTO_GENERATE_CERTS=false`; bootstrap protects generated files unless `--force` is used.
+- **Telemetry is host-level, not cgroup-level:** gopsutil reports host CPU and memory. It does not currently account for per-service cgroup quotas.
+- **No persistent state:** Registry and module cache are in memory. Master restart loses worker registry; worker restart loses compiled module cache.
+- **No method enforcement:** Handlers are path-based and do not reject unexpected HTTP methods.
+- **No authentication beyond mTLS:** There is no end-user authorization layer on `/api/v1/execute`; any valid client certificate trusted by the CA can call it.
+- **WASM ABI is narrow:** Modules must match the exact `memory`, `malloc`, and packed `run` ABI. WASI modules or modules with different host imports are not supported by the current engine path.
+
+### Operational Recommendations
+
+- Disable `AUTO_GENERATE_CERTS` in production.
+- Use short-lived or rotated mTLS certificates and restrict CA distribution.
+- Use stable, unique `WORKER_ID` values because certificate filenames depend on them.
+- Set worker coordinates explicitly so distance scheduling has meaningful data.
+- Set capacity thresholds to prevent overloaded workers from receiving new executions.
+- Ensure `WORKER_ADVERTISE_ADDRESS` is reachable from the master.
+- Use immutable `ModuleName` values or include digest/version in the name to avoid stale worker caches.
+- Keep `MAX_CONCURRENT_EXECS` aligned with CPU and memory capacity of each worker host.
+- Add mTLS-capable health checks in service monitoring.
+- For ACR deployments, run the master with a managed identity or service principal with repository pull permission.

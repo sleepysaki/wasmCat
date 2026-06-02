@@ -17,11 +17,13 @@ type Limits struct {
 }
 
 type MasterConfig struct {
-	Port              string
-	CertDir           string
-	AutoGenerateCerts bool
-	WorkerIDForCert   string
-	CleanupInterval   time.Duration
+	Port               string
+	CertDir            string
+	AutoGenerateCerts  bool
+	WorkerIDForCert    string
+	CleanupInterval    time.Duration
+	MinWorkerCPUFree   float64
+	MinWorkerRAMFreeMB float64
 }
 
 type WorkerConfig struct {
@@ -29,6 +31,8 @@ type WorkerConfig struct {
 	NodeID            string
 	MasterURL         string
 	AdvertiseAddress  string
+	Latitude          float64
+	Longitude         float64
 	CertDir           string
 	HeartbeatInterval time.Duration
 	Limits            Limits
@@ -43,13 +47,23 @@ func LoadMaster() (MasterConfig, error) {
 	if err != nil {
 		return MasterConfig{}, err
 	}
+	minWorkerCPUFree, err := float64Env("MIN_WORKER_CPU_FREE", 0)
+	if err != nil {
+		return MasterConfig{}, err
+	}
+	minWorkerRAMFreeMB, err := float64Env("MIN_WORKER_RAM_FREE_MB", 0)
+	if err != nil {
+		return MasterConfig{}, err
+	}
 
 	cfg := MasterConfig{
-		Port:              stringEnv("MASTER_PORT", "7270"),
-		CertDir:           stringEnv("CERT_DIR", "./certs"),
-		AutoGenerateCerts: autoGenerateCerts,
-		WorkerIDForCert:   stringEnv("DEV_WORKER_ID", "worker-vn-01"),
-		CleanupInterval:   cleanupInterval,
+		Port:               stringEnv("MASTER_PORT", "7270"),
+		CertDir:            stringEnv("CERT_DIR", "./certs"),
+		AutoGenerateCerts:  autoGenerateCerts,
+		WorkerIDForCert:    stringEnv("DEV_WORKER_ID", "worker-vn-01"),
+		CleanupInterval:    cleanupInterval,
+		MinWorkerCPUFree:   minWorkerCPUFree,
+		MinWorkerRAMFreeMB: minWorkerRAMFreeMB,
 	}
 
 	return cfg, nil
@@ -65,6 +79,20 @@ func LoadWorker() (WorkerConfig, error) {
 	if err != nil {
 		return WorkerConfig{}, err
 	}
+	latitude, err := float64Env("WORKER_LATITUDE", 0)
+	if err != nil {
+		return WorkerConfig{}, err
+	}
+	if latitude < -90 || latitude > 90 {
+		return WorkerConfig{}, fmt.Errorf("WORKER_LATITUDE must be between -90 and 90")
+	}
+	longitude, err := float64Env("WORKER_LONGITUDE", 0)
+	if err != nil {
+		return WorkerConfig{}, err
+	}
+	if longitude < -180 || longitude > 180 {
+		return WorkerConfig{}, fmt.Errorf("WORKER_LONGITUDE must be between -180 and 180")
+	}
 
 	nodeID := stringEnv("WORKER_ID", "worker-vn-01")
 	port := stringEnv("WORKER_PORT", "7271")
@@ -74,6 +102,8 @@ func LoadWorker() (WorkerConfig, error) {
 		NodeID:            nodeID,
 		MasterURL:         stringEnv("MASTER_URL", "https://localhost:7270"),
 		AdvertiseAddress:  stringEnv("WORKER_ADVERTISE_ADDRESS", "localhost:"+port),
+		Latitude:          latitude,
+		Longitude:         longitude,
 		CertDir:           stringEnv("CERT_DIR", "./certs"),
 		HeartbeatInterval: heartbeatInterval,
 		Limits:            limits,
@@ -186,6 +216,20 @@ func int64Env(name string, fallback int64) (int64, error) {
 	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("parse %s integer: %w", name, err)
+	}
+
+	return parsed, nil
+}
+
+func float64Env(name string, fallback float64) (float64, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback, nil
+	}
+
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s float: %w", name, err)
 	}
 
 	return parsed, nil

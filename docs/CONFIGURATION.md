@@ -11,6 +11,8 @@ wasmCat reads runtime configuration from environment variables and keeps local-d
 | `AUTO_GENERATE_CERTS` | `true` | Generate local development CA/master/worker certs on master startup. Disable in production. |
 | `DEV_WORKER_ID` | `worker-vn-01` | Worker ID used by local dev certificate generation. |
 | `CLEANUP_INTERVAL` | `15s` | How often the master removes stale workers from the registry. |
+| `MIN_WORKER_CPU_FREE` | `0` | Minimum free CPU percentage required for a worker to receive new work. |
+| `MIN_WORKER_RAM_FREE_MB` | `0` | Minimum free RAM in MiB required for a worker to receive new work. |
 
 ## Worker
 
@@ -20,6 +22,8 @@ wasmCat reads runtime configuration from environment variables and keeps local-d
 | `WORKER_PORT` | `7271` | HTTPS port for the worker invoke server. |
 | `MASTER_URL` | `https://localhost:7270` | Master URL used for registration and heartbeat. |
 | `WORKER_ADVERTISE_ADDRESS` | `localhost:<worker-port>` | Address the master uses to call this worker. |
+| `WORKER_LATITUDE` | `0` | Worker latitude used by the scheduler. Must be between `-90` and `90`. |
+| `WORKER_LONGITUDE` | `0` | Worker longitude used by the scheduler. Must be between `-180` and `180`. |
 | `CERT_DIR` | `./certs` | Directory containing `ca.crt`, `worker-<id>.crt`, and `worker-<id>.key`. |
 | `HEARTBEAT_INTERVAL` | `5s` | Worker registration and heartbeat interval. |
 
@@ -39,6 +43,8 @@ Example:
 ```powershell
 $env:WORKER_ID="worker-us-01"
 $env:MASTER_URL="https://master.internal:7270"
+$env:WORKER_LATITUDE="40.7128"
+$env:WORKER_LONGITUDE="-74.0060"
 $env:CERT_DIR="C:\wasmcat\certs"
 $env:MAX_CONCURRENT_EXECS="8"
 go run ./cmd/worker

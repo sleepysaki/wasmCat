@@ -11,6 +11,8 @@ func TestLoadWorkerReadsEnvironment(t *testing.T) {
 	t.Setenv("WORKER_PORT", "9001")
 	t.Setenv("MASTER_URL", "https://master.test:9443")
 	t.Setenv("WORKER_ADVERTISE_ADDRESS", "worker.test:9001")
+	t.Setenv("WORKER_LATITUDE", "13.7563")
+	t.Setenv("WORKER_LONGITUDE", "100.5018")
 	t.Setenv("CERT_DIR", "C:\\wasmcat\\certs")
 	t.Setenv("HEARTBEAT_INTERVAL", "2s")
 	t.Setenv("EXECUTION_TIMEOUT", "3s")
@@ -36,6 +38,12 @@ func TestLoadWorkerReadsEnvironment(t *testing.T) {
 	}
 	if cfg.AdvertiseAddress != "worker.test:9001" {
 		t.Fatalf("expected configured advertise address, got %q", cfg.AdvertiseAddress)
+	}
+	if cfg.Latitude != 13.7563 {
+		t.Fatalf("expected configured latitude, got %f", cfg.Latitude)
+	}
+	if cfg.Longitude != 100.5018 {
+		t.Fatalf("expected configured longitude, got %f", cfg.Longitude)
 	}
 	if cfg.CertDir != "C:\\wasmcat\\certs" {
 		t.Fatalf("expected configured cert dir, got %q", cfg.CertDir)
@@ -76,6 +84,8 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	t.Setenv("CERT_DIR", "/etc/wasmcat/certs")
 	t.Setenv("AUTO_GENERATE_CERTS", "false")
 	t.Setenv("DEV_WORKER_ID", "worker-prod-01")
+	t.Setenv("MIN_WORKER_CPU_FREE", "15.5")
+	t.Setenv("MIN_WORKER_RAM_FREE_MB", "512")
 
 	cfg, err := config.LoadMaster()
 	if err != nil {
@@ -91,6 +101,12 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	if cfg.WorkerIDForCert != "worker-prod-01" {
 		t.Fatalf("expected worker-prod-01, got %q", cfg.WorkerIDForCert)
 	}
+	if cfg.MinWorkerCPUFree != 15.5 {
+		t.Fatalf("expected min CPU 15.5, got %f", cfg.MinWorkerCPUFree)
+	}
+	if cfg.MinWorkerRAMFreeMB != 512 {
+		t.Fatalf("expected min RAM 512, got %f", cfg.MinWorkerRAMFreeMB)
+	}
 }
 
 func TestLoadMasterRejectsInvalidAutoGenerateCerts(t *testing.T) {
@@ -99,5 +115,14 @@ func TestLoadMasterRejectsInvalidAutoGenerateCerts(t *testing.T) {
 	_, err := config.LoadMaster()
 	if err == nil {
 		t.Fatal("expected invalid boolean error")
+	}
+}
+
+func TestLoadWorkerRejectsInvalidCoordinates(t *testing.T) {
+	t.Setenv("WORKER_LATITUDE", "north")
+
+	_, err := config.LoadWorker()
+	if err == nil {
+		t.Fatal("expected invalid latitude error")
 	}
 }

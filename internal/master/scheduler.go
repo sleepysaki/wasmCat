@@ -10,11 +10,36 @@ import (
 // EarthRadius is the mean radius of the Earth in kilometers.
 const EarthRadius = 6371.0
 
-type Scheduler struct{}
+type Scheduler struct {
+	MinCPUFree   float64
+	MinRAMFreeMB float64
+}
 
-// SelectWorker selects the best worker according to spatial distance.
+// SelectWorker filters out workers below the configured free CPU/RAM thresholds,
+// then selects the closest eligible worker by spatial distance.
 func (s *Scheduler) SelectWorker(userLat, userLon float64, workers []shared.WorkerNode) (shared.WorkerNode, error) {
-	return FindClosestWorker(userLat, userLon, workers)
+	eligible := FilterWorkersByCapacity(workers, s.MinCPUFree, s.MinRAMFreeMB)
+	if len(eligible) == 0 {
+		return shared.WorkerNode{}, errors.New("no active workers meet capacity requirements")
+	}
+
+	return FindClosestWorker(userLat, userLon, eligible)
+}
+
+// FilterWorkersByCapacity keeps workers with enough reported free CPU and RAM.
+func FilterWorkersByCapacity(workers []shared.WorkerNode, minCPUFree float64, minRAMFreeMB float64) []shared.WorkerNode {
+	eligible := make([]shared.WorkerNode, 0, len(workers))
+	for _, worker := range workers {
+		if worker.CPUFree < minCPUFree {
+			continue
+		}
+		if worker.RAMFreeMB < minRAMFreeMB {
+			continue
+		}
+		eligible = append(eligible, worker)
+	}
+
+	return eligible
 }
 
 // FindClosestWorker iterates through all active workers and returns the one physically closest to the user.

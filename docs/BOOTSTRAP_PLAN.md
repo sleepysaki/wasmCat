@@ -49,7 +49,14 @@ The generated `master.env` disables automatic certificate generation:
 AUTO_GENERATE_CERTS=false
 ```
 
-That keeps production startup deterministic. Operators must provide `ca.crt`, `master.crt`, and `master.key` before starting the service.
+That keeps production startup deterministic. The generated file also includes scheduler capacity thresholds:
+
+```text
+MIN_WORKER_CPU_FREE=0
+MIN_WORKER_RAM_FREE_MB=0
+```
+
+Operators can raise these values to stop the master from assigning new work to overloaded workers. Operators must provide `ca.crt`, `master.crt`, and `master.key` before starting the service.
 
 For local development, the command can also generate a local CA, master cert, and one worker cert:
 
@@ -77,11 +84,13 @@ sudo wasmcat-worker init \
   --worker-id worker-us-01 \
   --master-url https://master.example.com:7270 \
   --advertise-address worker-us-01.example.com:7271 \
+  --latitude 40.7128 \
+  --longitude -74.0060 \
   --config-dir /etc/wasmcat \
   --cert-dir /etc/wasmcat/certs
 ```
 
-The worker command validates that `MASTER_URL` is an HTTPS URL and writes the same limit settings used by the worker runtime.
+The worker command validates that `MASTER_URL` is an HTTPS URL and writes the same location and limit settings used by the worker runtime.
 
 Operators must provide:
 

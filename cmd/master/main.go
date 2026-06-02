@@ -46,8 +46,11 @@ func main() {
 	slog.Info("state registry initialized")
 
 	// Create the Scheduler
-	sched := &master.Scheduler{}
-	slog.Info("spatial scheduler initialized")
+	sched := &master.Scheduler{
+		MinCPUFree:   cfg.MinWorkerCPUFree,
+		MinRAMFreeMB: cfg.MinWorkerRAMFreeMB,
+	}
+	slog.Info("capacity-aware scheduler initialized", "min_cpu_free", cfg.MinWorkerCPUFree, "min_ram_free_mb", cfg.MinWorkerRAMFreeMB)
 
 	// Create the Dispatcher, need both the Registry and the Scheduler
 	dispatch := &master.Dispatcher{
@@ -115,6 +118,8 @@ func runInit(args []string) error {
 	certDir := flags.String("cert-dir", "", "directory for mTLS certificates; defaults to <config-dir>/certs")
 	port := flags.String("port", "7270", "master HTTPS port")
 	cleanupInterval := flags.String("cleanup-interval", "15s", "registry cleanup interval")
+	minWorkerCPUFree := flags.Float64("min-worker-cpu-free", 0, "minimum free CPU percent required for scheduling")
+	minWorkerRAMFreeMB := flags.Float64("min-worker-ram-free-mb", 0, "minimum free RAM in MiB required for scheduling")
 	devWorkerID := flags.String("dev-worker-id", "worker-vn-01", "worker ID used when generating development certificates")
 	devCerts := flags.Bool("dev-certs", false, "generate local development certificates")
 	force := flags.Bool("force", false, "overwrite existing generated files")
@@ -124,13 +129,15 @@ func runInit(args []string) error {
 	}
 
 	result, err := bootstrap.InitMaster(bootstrap.MasterOptions{
-		ConfigDir:        *configDir,
-		CertDir:          *certDir,
-		Port:             *port,
-		CleanupInterval:  *cleanupInterval,
-		DevWorkerID:      *devWorkerID,
-		GenerateDevCerts: *devCerts,
-		Force:            *force,
+		ConfigDir:          *configDir,
+		CertDir:            *certDir,
+		Port:               *port,
+		CleanupInterval:    *cleanupInterval,
+		MinWorkerCPUFree:   *minWorkerCPUFree,
+		MinWorkerRAMFreeMB: *minWorkerRAMFreeMB,
+		DevWorkerID:        *devWorkerID,
+		GenerateDevCerts:   *devCerts,
+		Force:              *force,
 	})
 	if err != nil {
 		return err
