@@ -185,7 +185,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **`.github/workflows/ci.yml`:** Pull request and main branch quality gates.
 - **`.github/workflows/release.yml`:** Tag-triggered native release publishing.
 - **`packaging/systemd/*`:** Service and env templates for Linux hosts.
-- **`tests/*`:** Go tests live outside production package directories and cover config, bootstrap, gateway, dispatcher, worker server, limits, and engine behavior.
+- **`tests/*`:** Go tests live outside production package directories and cover config, bootstrap, gateway, dispatcher, worker server, limits, engine behavior, and an in-memory master-to-worker execution path.
 
 ## 3. Comprehensive API & Function Reference
 
