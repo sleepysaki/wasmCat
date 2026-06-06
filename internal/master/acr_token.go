@@ -70,7 +70,7 @@ func exchangeAADTokenForRefreshToken(ctx context.Context, service string, tenant
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := acrHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("exchange aad token for refresh token: %w", err)
 	}
@@ -105,7 +105,7 @@ func exchangeRefreshTokenForAccessToken(ctx context.Context, service string, rep
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := acrHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("exchange refresh token for access token: %w", err)
 	}

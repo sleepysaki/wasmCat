@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"wasmcat/internal/shared"
 )
 
 // GenerateCAAndCerts creates a local CA and leaf certificates for the master
@@ -179,13 +180,9 @@ func NewMTLSHTTPClient(certFile string, keyFile string, caFile string) (*http.Cl
 		return nil, fmt.Errorf("append ca certs")
 	}
 
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			Certificates: []tls.Certificate{clientCert},
-			RootCAs:      caPool,
-			MinVersion:   tls.VersionTLS12,
-		},
-	}
-
-	return &http.Client{Transport: transport}, nil
+	return shared.NewHTTPClientWithTLSConfig(&tls.Config{
+		Certificates: []tls.Certificate{clientCert},
+		RootCAs:      caPool,
+		MinVersion:   tls.VersionTLS12,
+	}), nil
 }

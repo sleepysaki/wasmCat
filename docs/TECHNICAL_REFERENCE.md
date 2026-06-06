@@ -113,6 +113,12 @@ The core responsibility is to execute WASM modules on registered workers without
 - **State & Properties:** No internal state.
 - **Interactions:** Master and worker handlers call `WriteJSON` and `WriteError`.
 
+### `internal/shared/client.go`
+
+- **Name & Responsibility:** Creates outbound HTTP clients and transports with bounded timeouts.
+- **State & Properties:** Timeout and connection-pool constants for dial, TLS handshake, response headers, full request duration, idle connections, and idle pool size.
+- **Interactions:** Worker module fetches, ACR manifest/token calls, dispatcher mTLS clients, and telemetry mTLS clients use this transport policy.
+
 ### `internal/master/gateway.go`
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
@@ -185,7 +191,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **`.github/workflows/ci.yml`:** Pull request and main branch quality gates.
 - **`.github/workflows/release.yml`:** Tag-triggered native release publishing.
 - **`packaging/systemd/*`:** Service and env templates for Linux hosts.
-- **`tests/*`:** Go tests live outside production package directories and cover config, bootstrap, gateway, dispatcher, worker server, limits, cache lifecycle, engine behavior, and an in-memory master-to-worker execution path.
+- **`tests/*`:** Go tests live outside production package directories and cover config, bootstrap, gateway, dispatcher, shared HTTP clients, worker server, limits, cache lifecycle, engine behavior, and an in-memory master-to-worker execution path.
 
 ## 3. Comprehensive API & Function Reference
 
@@ -436,9 +442,26 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func NewMTLSHTTPClient(certFile string, keyFile string, caFile string) (*http.Client, error)`
 
 - **Parameters:** Client cert path, client key path, CA cert path.
-- **Return Values:** HTTP client with TLS client cert, root CA pool, and TLS 1.2 minimum.
+- **Return Values:** HTTP client with TLS client cert, root CA pool, TLS 1.2 minimum, and shared timeout/transport defaults.
 - **Error Handling:** Cert/key load failures, CA read failures, CA parse failures.
 - **Side Effects:** Reads certificate files.
+
+##### `func NewHTTPClient() *http.Client`
+
+- **Return Values:** HTTP client with the default wasmCat timeout and connection-pool policy.
+- **Side Effects:** None.
+
+##### `func NewHTTPClientWithTLSConfig(tlsConfig *tls.Config) *http.Client`
+
+- **Parameters:** Optional TLS client configuration.
+- **Return Values:** HTTP client with the provided TLS config and default timeout policy.
+- **Side Effects:** None.
+
+##### `func NewHTTPTransport(tlsConfig *tls.Config) *http.Transport`
+
+- **Parameters:** Optional TLS client configuration.
+- **Return Values:** Transport with proxy support, dial timeout, keep-alive, TLS handshake timeout, response-header timeout, idle timeout, and idle connection limits.
+- **Side Effects:** None.
 
 ### Logging package
 
@@ -1012,10 +1035,10 @@ output_len = uint32(result)
 - **Capacity thresholds are opt-in:** Defaults are zero, so every worker remains eligible unless operators set `MIN_WORKER_CPU_FREE` or `MIN_WORKER_RAM_FREE_MB`.
 - **Registry cleanup age is fixed:** `Registry.Cleanup` removes nodes older than 30 seconds. `CLEANUP_INTERVAL` controls how often cleanup runs, not the expiration age.
 - **ACR token generation is uncached:** Each ACR dispatch can perform Azure credential lookup and token exchange.
-- **HTTP clients generally rely on context cancellation:** Dispatcher and ACR clients do not set explicit `http.Client.Timeout`; callers must provide bounded contexts.
+- **HTTP clients are bounded:** Shared client defaults set total request, dial, TLS handshake, response-header, idle connection, and pool limits. Request contexts still provide operation-specific cancellation.
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
-- **Duplicate fetch race:** Two concurrent first-time requests for the same module can both download and compile; only one compiled module is stored.
+- **Cold fetch coalescing is process-local:** Concurrent cold requests for the same cache key share one download/compile inside a worker process. Separate workers still compile independently.
 - **Execution time field is not populated:** `ExecutionResponse.ExecutionTimeMs` exists but worker currently returns only `Result`; dispatcher logs duration separately.
 - **Health/readiness require mTLS:** Because TLS client auth is configured at server level, probes must present valid client certificates unless TLS routing changes.
 - **Worker invoke nil engine risk:** Readiness checks for nil engine, but `/invoke` accesses `s.Engine.Limits()` before a nil check. Normal startup always sets the engine.

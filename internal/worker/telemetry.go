@@ -3,13 +3,9 @@ package worker
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"time"
 	"wasmcat/internal/security"
 	"wasmcat/internal/shared"
@@ -60,33 +56,7 @@ func StartTelemetryWithMetrics(ctx context.Context, masterURL string, nodeID str
 }
 
 func newMTLSClient(certDir string, nodeID string) (*http.Client, error) {
-	certFile := security.WorkerCertPath(certDir, nodeID)
-	keyFile := security.WorkerKeyPath(certDir, nodeID)
-	caFile := security.CACertPath(certDir)
-
-	clientCert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		return nil, fmt.Errorf("load worker cert: %w", err)
-	}
-
-	caPEM, err := os.ReadFile(caFile)
-	if err != nil {
-		return nil, fmt.Errorf("read ca cert: %w", err)
-	}
-	caPool := x509.NewCertPool()
-	if !caPool.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("append ca cert")
-	}
-
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			Certificates: []tls.Certificate{clientCert},
-			RootCAs:      caPool,
-			MinVersion:   tls.VersionTLS12,
-		},
-	}
-
-	return &http.Client{Transport: transport}, nil
+	return security.NewMTLSHTTPClient(security.WorkerCertPath(certDir, nodeID), security.WorkerKeyPath(certDir, nodeID), security.CACertPath(certDir))
 }
 
 func registerWorker(client *http.Client, masterURL string, nodeID string, workerAddress string, latitude float64, longitude float64) {

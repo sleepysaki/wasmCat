@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"wasmcat/internal/shared"
 )
+
+var acrHTTPClient = shared.NewHTTPClient()
 
 const (
 	acrReferenceKindRepository = "repository"
@@ -176,7 +179,7 @@ func fetchACRManifest(ctx context.Context, manifestURL string, token string) (oc
 		"application/vnd.docker.distribution.manifest.list.v2+json",
 	}, ", "))
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := acrHTTPClient.Do(req)
 	if err != nil {
 		return ociManifest{}, fmt.Errorf("fetch acr manifest: %w", err)
 	}

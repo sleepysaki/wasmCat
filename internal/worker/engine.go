@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"wasmcat/internal/shared"
 
 	"github.com/tetratelabs/wazero"
 )
@@ -55,6 +56,7 @@ type WasmEngine struct {
 	inflight   map[string]chan struct{}
 	cacheBytes int64
 	cacheClock uint64
+	client     *http.Client
 	mu         sync.RWMutex
 	limits     Limits
 	sem        chan struct{}
@@ -71,6 +73,7 @@ func NewWasmEngineWithLimits(ctx context.Context, limits Limits) *WasmEngine {
 		runtime:  wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true)),
 		cache:    make(map[string]moduleCacheEntry),
 		inflight: make(map[string]chan struct{}),
+		client:   shared.NewHTTPClient(),
 		limits:   limits,
 		sem:      make(chan struct{}, limits.MaxConcurrentExecs),
 	}
@@ -307,7 +310,7 @@ func (e *WasmEngine) downloadAndCompile(ctx context.Context, moduleName, moduleU
 
 	// Download the raw .wasm bytes.
 	// This is still a simple client; production should add size limits and client timeouts.
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := e.client.Do(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("download %s: %w", moduleURL, err)
 	}
