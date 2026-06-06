@@ -43,11 +43,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) 
 		}
 		req.JITBearerToken = token
 
-		resolvedModuleURL, err := resolveACRModuleURL(ctx, moduleRegistryURL, token, ref)
+		resolvedModuleURL, moduleDigest, err := resolveACRModuleURL(ctx, moduleRegistryURL, token, ref)
 		if err != nil {
 			return shared.ExecutionResponse{}, err
 		}
 		req.ModuleURL = resolvedModuleURL
+		req.ModuleDigest = moduleDigest
 	}
 
 	workers := d.Registry.GetActiveWorkers()

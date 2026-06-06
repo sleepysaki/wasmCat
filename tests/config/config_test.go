@@ -21,6 +21,9 @@ func TestLoadWorkerReadsEnvironment(t *testing.T) {
 	t.Setenv("MAX_PAYLOAD_BYTES", "50")
 	t.Setenv("MAX_OUTPUT_BYTES", "25")
 	t.Setenv("MAX_CONCURRENT_EXECS", "2")
+	t.Setenv("MAX_CACHED_MODULES", "3")
+	t.Setenv("MAX_CACHE_BYTES", "1000")
+	t.Setenv("MODULE_CACHE_TTL", "5m")
 
 	cfg, err := config.LoadWorker()
 	if err != nil {
@@ -68,6 +71,15 @@ func TestLoadWorkerReadsEnvironment(t *testing.T) {
 	}
 	if cfg.Limits.MaxConcurrentExecs != 2 {
 		t.Fatalf("expected max concurrent execs 2, got %d", cfg.Limits.MaxConcurrentExecs)
+	}
+	if cfg.Limits.MaxCachedModules != 3 {
+		t.Fatalf("expected max cached modules 3, got %d", cfg.Limits.MaxCachedModules)
+	}
+	if cfg.Limits.MaxCacheBytes != 1000 {
+		t.Fatalf("expected max cache bytes 1000, got %d", cfg.Limits.MaxCacheBytes)
+	}
+	if cfg.Limits.ModuleCacheTTL != 5*time.Minute {
+		t.Fatalf("expected module cache ttl 5m, got %s", cfg.Limits.ModuleCacheTTL)
 	}
 }
 

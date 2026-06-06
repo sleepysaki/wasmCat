@@ -77,7 +77,7 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 
 	// Now that JSON is valid, ask the engine to run the module.
 	// r.Context() connects execution to the HTTP request, so cancellation can flow downward.
-	result, err := s.Engine.Execute(r.Context(), req.ModuleName, req.ModuleURL, req.Payload, req.JITBearerToken)
+	result, err := s.Engine.ExecuteWithDigest(r.Context(), req.ModuleName, req.ModuleURL, req.ModuleDigest, req.Payload, req.JITBearerToken)
 	if err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "execution_failed", err)
 		return

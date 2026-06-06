@@ -2,6 +2,8 @@
 
 wasmCat reads runtime configuration from environment variables and keeps local-development defaults when values are not set.
 
+Module cache behavior is documented in [MODULE_CACHE_LIFECYCLE.md](MODULE_CACHE_LIFECYCLE.md).
+
 ## Master
 
 | Variable | Default | Purpose |
@@ -37,6 +39,9 @@ wasmCat reads runtime configuration from environment variables and keeps local-d
 | `MAX_PAYLOAD_BYTES` | `1048576` | Max request payload size. |
 | `MAX_OUTPUT_BYTES` | `1048576` | Max WASM output size. |
 | `MAX_CONCURRENT_EXECS` | `4` | Max simultaneous executions per worker. |
+| `MAX_CACHED_MODULES` | `128` | Max compiled WASM modules kept in the worker cache. |
+| `MAX_CACHE_BYTES` | `268435456` | Max raw WASM bytes represented by cached compiled modules. |
+| `MODULE_CACHE_TTL` | `30m` | Max age for a compiled module cache entry before refetch. |
 
 Example:
 

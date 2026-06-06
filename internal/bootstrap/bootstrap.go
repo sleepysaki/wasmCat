@@ -39,6 +39,9 @@ type WorkerOptions struct {
 	MaxPayloadBytes    int64
 	MaxOutputBytes     uint32
 	MaxConcurrentExecs int
+	MaxCachedModules   int
+	MaxCacheBytes      int64
+	ModuleCacheTTL     string
 	Force              bool
 }
 
@@ -122,6 +125,9 @@ func InitWorker(options WorkerOptions) (Result, error) {
 		{"MAX_PAYLOAD_BYTES", strconv.FormatInt(options.MaxPayloadBytes, 10)},
 		{"MAX_OUTPUT_BYTES", strconv.FormatUint(uint64(options.MaxOutputBytes), 10)},
 		{"MAX_CONCURRENT_EXECS", strconv.Itoa(options.MaxConcurrentExecs)},
+		{"MAX_CACHED_MODULES", strconv.Itoa(options.MaxCachedModules)},
+		{"MAX_CACHE_BYTES", strconv.FormatInt(options.MaxCacheBytes, 10)},
+		{"MODULE_CACHE_TTL", options.ModuleCacheTTL},
 	}
 
 	if err := writeEnvFile(configPath, values, options.Force); err != nil {
@@ -175,6 +181,9 @@ func normalizeWorker(options WorkerOptions) WorkerOptions {
 	}
 	if options.ModuleFetchTimeout == "" {
 		options.ModuleFetchTimeout = "10s"
+	}
+	if options.ModuleCacheTTL == "" {
+		options.ModuleCacheTTL = "30m"
 	}
 	if options.CertDir == "" && options.ConfigDir != "" {
 		options.CertDir = filepath.Join(options.ConfigDir, "certs")
@@ -237,6 +246,9 @@ func validateWorker(options WorkerOptions) error {
 	if _, err := time.ParseDuration(options.ModuleFetchTimeout); err != nil {
 		return fmt.Errorf("parse module fetch timeout: %w", err)
 	}
+	if _, err := time.ParseDuration(options.ModuleCacheTTL); err != nil {
+		return fmt.Errorf("parse module cache ttl: %w", err)
+	}
 	if options.MaxModuleBytes <= 0 {
 		return fmt.Errorf("max module bytes must be greater than zero")
 	}
@@ -248,6 +260,12 @@ func validateWorker(options WorkerOptions) error {
 	}
 	if options.MaxConcurrentExecs <= 0 {
 		return fmt.Errorf("max concurrent executions must be greater than zero")
+	}
+	if options.MaxCachedModules <= 0 {
+		return fmt.Errorf("max cached modules must be greater than zero")
+	}
+	if options.MaxCacheBytes <= 0 {
+		return fmt.Errorf("max cache bytes must be greater than zero")
 	}
 
 	return nil

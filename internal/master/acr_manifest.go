@@ -134,25 +134,30 @@ func parseACRReference(moduleRegistryURL string) (string, string, error) {
 	return ref.RegistryName, ref.RepositoryName, nil
 }
 
-func resolveACRModuleURL(ctx context.Context, moduleRegistryURL string, token string, ref acrReference) (string, error) {
+func resolveACRModuleURL(ctx context.Context, moduleRegistryURL string, token string, ref acrReference) (string, string, error) {
 	// Blob URLs already point at downloadable bytes, so the worker can fetch them directly.
 	if ref.Kind != acrReferenceKindManifest {
-		return moduleRegistryURL, nil
+		return moduleRegistryURL, ref.Reference, nil
 	}
 
 	// Manifest URLs point at registry metadata.
 	// The master reads that metadata and rewrites the request to the selected layer blob.
 	manifest, err := fetchACRManifest(ctx, moduleRegistryURL, token)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	layer, err := selectWASMLayer(manifest)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	return buildACRBlobURL(moduleRegistryURL, ref.RepositoryName, layer.Digest)
+	blobURL, err := buildACRBlobURL(moduleRegistryURL, ref.RepositoryName, layer.Digest)
+	if err != nil {
+		return "", "", err
+	}
+
+	return blobURL, layer.Digest, nil
 }
 
 func FetchACRManifest(ctx context.Context, manifestURL string, token string) (OCIManifest, error) {

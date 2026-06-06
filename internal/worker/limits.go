@@ -9,6 +9,9 @@ type Limits struct {
 	MaxPayloadBytes    int64
 	MaxOutputBytes     uint32
 	MaxConcurrentExecs int
+	MaxCachedModules   int
+	MaxCacheBytes      int64
+	ModuleCacheTTL     time.Duration
 }
 
 var DefaultLimits = Limits{
@@ -18,6 +21,9 @@ var DefaultLimits = Limits{
 	MaxPayloadBytes:    1 << 20,  // 1 MiB
 	MaxOutputBytes:     1 << 20,  // 1 MiB
 	MaxConcurrentExecs: 4,
+	MaxCachedModules:   128,
+	MaxCacheBytes:      256 << 20, // 256 MiB
+	ModuleCacheTTL:     30 * time.Minute,
 }
 
 func normalizeLimits(limits Limits) Limits {
@@ -40,6 +46,15 @@ func normalizeLimits(limits Limits) Limits {
 	}
 	if limits.MaxConcurrentExecs <= 0 {
 		limits.MaxConcurrentExecs = DefaultLimits.MaxConcurrentExecs
+	}
+	if limits.MaxCachedModules <= 0 {
+		limits.MaxCachedModules = DefaultLimits.MaxCachedModules
+	}
+	if limits.MaxCacheBytes <= 0 {
+		limits.MaxCacheBytes = DefaultLimits.MaxCacheBytes
+	}
+	if limits.ModuleCacheTTL <= 0 {
+		limits.ModuleCacheTTL = DefaultLimits.ModuleCacheTTL
 	}
 
 	return limits

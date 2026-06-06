@@ -6,19 +6,58 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/tetratelabs/wazero"
 )
 
+type ModuleCacheKey struct {
+	ModuleName string
+	ModuleURL  string
+	Digest     string
+}
+
+func (k ModuleCacheKey) String() string {
+	if k.Digest != "" {
+		return k.ModuleName + "@digest:" + k.Digest
+	}
+	if k.ModuleURL != "" {
+		return k.ModuleName + "@url:" + k.ModuleURL
+	}
+
+	return k.ModuleName
+}
+
+type ModuleCacheStats struct {
+	Entries    int
+	Bytes      int64
+	MaxEntries int
+	MaxBytes   int64
+}
+
+type moduleCacheEntry struct {
+	key        ModuleCacheKey
+	compiled   wazero.CompiledModule
+	sizeBytes  int64
+	createdAt  time.Time
+	lastUsedAt time.Time
+	usedOrder  uint64
+}
+
 type WasmEngine struct {
 	// Store wazero.Runtime aka engine and image caches to avoid reloading and recompiling for each execution
 	runtime wazero.Runtime
-	cache   map[string]wazero.CompiledModule
-	mu      sync.RWMutex
-	limits  Limits
-	sem     chan struct{}
+	cache   map[string]moduleCacheEntry
+	// inflight marks cache keys currently being downloaded and compiled.
+	// Followers wait for the leader instead of repeating the same expensive cold compile.
+	inflight   map[string]chan struct{}
+	cacheBytes int64
+	cacheClock uint64
+	mu         sync.RWMutex
+	limits     Limits
+	sem        chan struct{}
 }
 
 func NewWasmEngine(ctx context.Context) *WasmEngine {
@@ -29,10 +68,11 @@ func NewWasmEngineWithLimits(ctx context.Context, limits Limits) *WasmEngine {
 	limits = normalizeLimits(limits)
 
 	return &WasmEngine{
-		runtime: wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true)),
-		cache:   make(map[string]wazero.CompiledModule),
-		limits:  limits,
-		sem:     make(chan struct{}, limits.MaxConcurrentExecs),
+		runtime:  wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true)),
+		cache:    make(map[string]moduleCacheEntry),
+		inflight: make(map[string]chan struct{}),
+		limits:   limits,
+		sem:      make(chan struct{}, limits.MaxConcurrentExecs),
 	}
 }
 
@@ -40,15 +80,44 @@ func (e *WasmEngine) Limits() Limits {
 	return e.limits
 }
 
-func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL string, bearerToken string) error {
-	// First check the cache with a read lock.
-	// Read locks let many goroutines check the map at the same time,
-	// which is useful because most executions should use an already compiled module.
+func (e *WasmEngine) CacheStats() ModuleCacheStats {
 	e.mu.RLock()
-	_, ok := e.cache[moduleName]
-	e.mu.RUnlock()
-	if ok {
-		slog.Info("module cache hit", "module_name", moduleName)
+	defer e.mu.RUnlock()
+
+	return ModuleCacheStats{
+		Entries:    len(e.cache),
+		Bytes:      e.cacheBytes,
+		MaxEntries: e.limits.MaxCachedModules,
+		MaxBytes:   e.limits.MaxCacheBytes,
+	}
+}
+
+func (e *WasmEngine) ClearCache(ctx context.Context) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	for key, entry := range e.cache {
+		_ = entry.compiled.Close(ctx)
+		delete(e.cache, key)
+	}
+	e.cacheBytes = 0
+}
+
+func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL string, bearerToken string) error {
+	return e.FetchAndCacheWithDigest(ctx, moduleName, moduleURL, "", bearerToken)
+}
+
+func (e *WasmEngine) FetchAndCacheWithDigest(ctx context.Context, moduleName, moduleURL string, moduleDigest string, bearerToken string) error {
+	cacheKey := ModuleCacheKey{
+		ModuleName: strings.TrimSpace(moduleName),
+		ModuleURL:  strings.TrimSpace(moduleURL),
+		Digest:     strings.TrimSpace(moduleDigest),
+	}
+	cacheKeyString := cacheKey.String()
+
+	// First check the cache. A hit also updates lastUsedAt so eviction can keep hot modules.
+	if e.touchCachedModule(cacheKeyString, time.Now()) {
+		slog.Info("module cache hit", "module_name", moduleName, "module_digest", moduleDigest)
 		return nil
 	}
 
@@ -58,60 +127,54 @@ func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL st
 		return fmt.Errorf("module %s has no module URL", moduleName)
 	}
 
-	// Module fetching has its own timeout.
-	// This keeps slow storage or a stuck registry from holding a worker request forever.
-	fetchCtx, cancel := context.WithTimeout(ctx, e.limits.ModuleFetchTimeout)
-	defer cancel()
+	for {
+		compileDone, leader := e.beginCompile(cacheKeyString)
+		if leader {
+			defer e.finishCompile(cacheKeyString)
+			break
+		}
 
-	// Tie the download request to the execution context.
-	// If the caller cancels the request or adds a timeout later, the download stops too.
-	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, moduleURL, nil)
+		select {
+		case <-compileDone:
+			if e.touchCachedModule(cacheKeyString, time.Now()) {
+				slog.Info("module cache hit after wait", "module_name", moduleName, "module_digest", moduleDigest)
+				return nil
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	// Another goroutine may have filled the cache just before this goroutine became the leader.
+	if e.touchCachedModule(cacheKeyString, time.Now()) {
+		slog.Info("module cache hit", "module_name", moduleName, "module_digest", moduleDigest)
+		return nil
+	}
+
+	compiled, wasmBytes, err := e.downloadAndCompile(ctx, moduleName, moduleURL, bearerToken)
 	if err != nil {
-		return fmt.Errorf("create request for %s: %w", moduleURL, err)
-	}
-	if bearerToken != "" {
-		// Private registries like ACR expect the pull token in the Authorization header.
-		// The master mints this token and forwards it to the worker as JITBearerToken.
-		req.Header.Set("Authorization", "Bearer "+bearerToken)
-	}
-
-	// Download the raw .wasm bytes.
-	// This is still a simple client; production should add size limits and client timeouts.
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("download %s: %w", moduleURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download %s: unexpected status %s", moduleURL, resp.Status)
-	}
-
-	// Read only up to the configured module size plus one byte.
-	// The extra byte tells us the module is too large without needing to read the whole body.
-	limitedBody := io.LimitReader(resp.Body, e.limits.MaxModuleBytes+1)
-	wasmBytes, err := io.ReadAll(limitedBody)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", moduleURL, err)
-	}
-	if int64(len(wasmBytes)) > e.limits.MaxModuleBytes {
-		return fmt.Errorf("module %s exceeds max size of %d bytes", moduleName, e.limits.MaxModuleBytes)
-	}
-
-	// Compile once and cache the compiled form.
-	// Compilation is more expensive than instantiation, so the cache avoids doing it for every request.
-	compiled, err := e.runtime.CompileModule(fetchCtx, wasmBytes)
-	if err != nil {
-		return fmt.Errorf("compile %s: %w", moduleName, err)
+		return err
 	}
 
 	// Take the write lock only when changing the map.
-	// Another goroutine may have compiled the same module while this one was downloading,
-	// so keep the first cached version and drop the duplicate.
+	// The cache entry stores lifecycle data so later requests can enforce TTL and eviction limits.
 	e.mu.Lock()
-	if _, exists := e.cache[moduleName]; !exists {
-		e.cache[moduleName] = compiled
-		slog.Info("module compiled and cached", "module_name", moduleName, "module_url", moduleURL, "module_bytes", len(wasmBytes))
+	now := time.Now()
+	if _, exists := e.cache[cacheKeyString]; !exists {
+		e.cacheClock++
+		e.cache[cacheKeyString] = moduleCacheEntry{
+			key:        cacheKey,
+			compiled:   compiled,
+			sizeBytes:  int64(len(wasmBytes)),
+			createdAt:  now,
+			lastUsedAt: now,
+			usedOrder:  e.cacheClock,
+		}
+		e.cacheBytes += int64(len(wasmBytes))
+		e.evictLocked(ctx, now)
+		slog.Info("module compiled and cached", "module_name", moduleName, "module_url", moduleURL, "module_digest", moduleDigest, "module_bytes", len(wasmBytes), "cache_entries", len(e.cache), "cache_bytes", e.cacheBytes)
+	} else {
+		_ = compiled.Close(ctx)
 	}
 	e.mu.Unlock()
 
@@ -119,8 +182,12 @@ func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL st
 }
 
 func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL string, payload string, bearerToken string) (result string, err error) {
+	return e.ExecuteWithDigest(ctx, moduleName, moduleURL, "", payload, bearerToken)
+}
+
+func (e *WasmEngine) ExecuteWithDigest(ctx context.Context, moduleName string, moduleURL string, moduleDigest string, payload string, bearerToken string) (result string, err error) {
 	start := time.Now()
-	slog.Info("wasm execution started", "module_name", moduleName, "payload_bytes", len(payload))
+	slog.Info("wasm execution started", "module_name", moduleName, "module_digest", moduleDigest, "payload_bytes", len(payload))
 	defer func() {
 		if err != nil {
 			slog.Error("wasm execution failed", "module_name", moduleName, "duration_ms", time.Since(start).Milliseconds(), "error", err)
@@ -150,16 +217,19 @@ func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL s
 	defer cancel()
 
 	// Make sure the module is compiled and available.
-	// FetchAndCache downloads only on the first request for this module name.
-	if err := e.FetchAndCache(execCtx, moduleName, moduleURL, bearerToken); err != nil {
+	// FetchAndCache downloads only on a miss for the module's digest-aware cache key.
+	if err := e.FetchAndCacheWithDigest(execCtx, moduleName, moduleURL, moduleDigest, bearerToken); err != nil {
 		return "", err
 	}
 
 	// Pull the compiled module out of the cache.
 	// A compiled module is like a reusable template. It is not the running instance yet.
-	e.mu.RLock()
-	compiled, ok := e.cache[moduleName]
-	e.mu.RUnlock()
+	cacheKeyString := ModuleCacheKey{
+		ModuleName: strings.TrimSpace(moduleName),
+		ModuleURL:  strings.TrimSpace(moduleURL),
+		Digest:     strings.TrimSpace(moduleDigest),
+	}.String()
+	compiled, ok := e.cachedCompiledModule(cacheKeyString, time.Now())
 	if !ok {
 		return "", fmt.Errorf("module %s not loaded", moduleName)
 	}
@@ -215,4 +285,159 @@ func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL s
 
 	slog.Info("wasm execution completed", "module_name", moduleName, "duration_ms", time.Since(start).Milliseconds(), "output_bytes", len(output))
 	return output, nil
+}
+
+func (e *WasmEngine) downloadAndCompile(ctx context.Context, moduleName, moduleURL string, bearerToken string) (wazero.CompiledModule, []byte, error) {
+	// Module fetching has its own timeout.
+	// This keeps slow storage or a stuck registry from holding a worker request forever.
+	fetchCtx, cancel := context.WithTimeout(ctx, e.limits.ModuleFetchTimeout)
+	defer cancel()
+
+	// Tie the download request to the execution context.
+	// If the caller cancels the request or adds a timeout later, the download stops too.
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, moduleURL, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create request for %s: %w", moduleURL, err)
+	}
+	if bearerToken != "" {
+		// Private registries like ACR expect the pull token in the Authorization header.
+		// The master mints this token and forwards it to the worker as JITBearerToken.
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+
+	// Download the raw .wasm bytes.
+	// This is still a simple client; production should add size limits and client timeouts.
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("download %s: %w", moduleURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil, fmt.Errorf("download %s: unexpected status %s", moduleURL, resp.Status)
+	}
+
+	// Read only up to the configured module size plus one byte.
+	// The extra byte tells us the module is too large without needing to read the whole body.
+	limitedBody := io.LimitReader(resp.Body, e.limits.MaxModuleBytes+1)
+	wasmBytes, err := io.ReadAll(limitedBody)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", moduleURL, err)
+	}
+	if int64(len(wasmBytes)) > e.limits.MaxModuleBytes {
+		return nil, nil, fmt.Errorf("module %s exceeds max size of %d bytes", moduleName, e.limits.MaxModuleBytes)
+	}
+
+	// Compile once and cache the compiled form.
+	// Compilation is more expensive than instantiation, so the cache avoids doing it for every request.
+	compiled, err := e.runtime.CompileModule(fetchCtx, wasmBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("compile %s: %w", moduleName, err)
+	}
+
+	return compiled, wasmBytes, nil
+}
+
+func (e *WasmEngine) cachedCompiledModule(cacheKey string, now time.Time) (wazero.CompiledModule, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	entry, ok := e.cache[cacheKey]
+	if !ok {
+		return nil, false
+	}
+	if e.entryExpired(entry, now) {
+		e.removeEntryLocked(context.Background(), cacheKey, entry, "ttl_expired")
+		return nil, false
+	}
+	entry.lastUsedAt = now
+	e.cacheClock++
+	entry.usedOrder = e.cacheClock
+	e.cache[cacheKey] = entry
+
+	return entry.compiled, true
+}
+
+func (e *WasmEngine) touchCachedModule(cacheKey string, now time.Time) bool {
+	_, ok := e.cachedCompiledModule(cacheKey, now)
+	return ok
+}
+
+func (e *WasmEngine) beginCompile(cacheKey string) (<-chan struct{}, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if done, exists := e.inflight[cacheKey]; exists {
+		return done, false
+	}
+
+	done := make(chan struct{})
+	e.inflight[cacheKey] = done
+	return done, true
+}
+
+func (e *WasmEngine) finishCompile(cacheKey string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if done, exists := e.inflight[cacheKey]; exists {
+		close(done)
+		delete(e.inflight, cacheKey)
+	}
+}
+
+func (e *WasmEngine) evictLocked(ctx context.Context, now time.Time) {
+	for key, entry := range e.cache {
+		if e.entryExpired(entry, now) {
+			e.removeEntryLocked(ctx, key, entry, "ttl_expired")
+		}
+	}
+
+	for len(e.cache) > e.limits.MaxCachedModules {
+		key, entry, ok := e.oldestEntryLocked()
+		if !ok {
+			return
+		}
+		e.removeEntryLocked(ctx, key, entry, "max_cached_modules")
+	}
+
+	for e.cacheBytes > e.limits.MaxCacheBytes {
+		key, entry, ok := e.oldestEntryLocked()
+		if !ok {
+			return
+		}
+		e.removeEntryLocked(ctx, key, entry, "max_cache_bytes")
+	}
+}
+
+func (e *WasmEngine) entryExpired(entry moduleCacheEntry, now time.Time) bool {
+	return e.limits.ModuleCacheTTL > 0 && now.Sub(entry.createdAt) > e.limits.ModuleCacheTTL
+}
+
+func (e *WasmEngine) oldestEntryLocked() (string, moduleCacheEntry, bool) {
+	var oldestKey string
+	var oldestEntry moduleCacheEntry
+	found := false
+
+	for key, entry := range e.cache {
+		if !found || entry.usedOrder < oldestEntry.usedOrder {
+			oldestKey = key
+			oldestEntry = entry
+			found = true
+		}
+	}
+
+	return oldestKey, oldestEntry, found
+}
+
+func (e *WasmEngine) removeEntryLocked(ctx context.Context, key string, entry moduleCacheEntry, reason string) {
+	delete(e.cache, key)
+	e.cacheBytes -= entry.sizeBytes
+	if e.cacheBytes < 0 {
+		e.cacheBytes = 0
+	}
+	if err := entry.compiled.Close(ctx); err != nil {
+		slog.Warn("module cache close failed", "module_name", entry.key.ModuleName, "module_digest", entry.key.Digest, "reason", reason, "error", err)
+	}
+	slog.Info("module cache entry evicted", "module_name", entry.key.ModuleName, "module_digest", entry.key.Digest, "reason", reason, "cache_entries", len(e.cache), "cache_bytes", e.cacheBytes)
 }

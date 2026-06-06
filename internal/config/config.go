@@ -14,6 +14,9 @@ type Limits struct {
 	MaxPayloadBytes    int64
 	MaxOutputBytes     uint32
 	MaxConcurrentExecs int
+	MaxCachedModules   int
+	MaxCacheBytes      int64
+	ModuleCacheTTL     time.Duration
 }
 
 type MasterConfig struct {
@@ -120,6 +123,9 @@ func loadWorkerLimits() (Limits, error) {
 		MaxPayloadBytes:    1 << 20,
 		MaxOutputBytes:     1 << 20,
 		MaxConcurrentExecs: 4,
+		MaxCachedModules:   128,
+		MaxCacheBytes:      256 << 20,
+		ModuleCacheTTL:     30 * time.Minute,
 	}
 
 	executionTimeout, err := durationEnv("EXECUTION_TIMEOUT", defaults.ExecutionTimeout)
@@ -146,6 +152,18 @@ func loadWorkerLimits() (Limits, error) {
 	if err != nil {
 		return Limits{}, err
 	}
+	maxCachedModules, err := intEnv("MAX_CACHED_MODULES", defaults.MaxCachedModules)
+	if err != nil {
+		return Limits{}, err
+	}
+	maxCacheBytes, err := int64Env("MAX_CACHE_BYTES", defaults.MaxCacheBytes)
+	if err != nil {
+		return Limits{}, err
+	}
+	moduleCacheTTL, err := durationEnv("MODULE_CACHE_TTL", defaults.ModuleCacheTTL)
+	if err != nil {
+		return Limits{}, err
+	}
 
 	return Limits{
 		ExecutionTimeout:   executionTimeout,
@@ -154,6 +172,9 @@ func loadWorkerLimits() (Limits, error) {
 		MaxPayloadBytes:    maxPayloadBytes,
 		MaxOutputBytes:     maxOutputBytes,
 		MaxConcurrentExecs: maxConcurrentExecs,
+		MaxCachedModules:   maxCachedModules,
+		MaxCacheBytes:      maxCacheBytes,
+		ModuleCacheTTL:     moduleCacheTTL,
 	}, nil
 }
 

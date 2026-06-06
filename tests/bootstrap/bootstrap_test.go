@@ -103,6 +103,9 @@ func TestInitWorkerWritesEnv(t *testing.T) {
 		MaxPayloadBytes:    1 << 20,
 		MaxOutputBytes:     1 << 20,
 		MaxConcurrentExecs: 8,
+		MaxCachedModules:   16,
+		MaxCacheBytes:      64 << 20,
+		ModuleCacheTTL:     "10m",
 	})
 	if err != nil {
 		t.Fatalf("InitWorker returned error: %v", err)
@@ -116,6 +119,9 @@ func TestInitWorkerWritesEnv(t *testing.T) {
 	assertContains(t, env, "WORKER_LATITUDE=40.7128\n")
 	assertContains(t, env, "WORKER_LONGITUDE=-74.006\n")
 	assertContains(t, env, "MAX_CONCURRENT_EXECS=8\n")
+	assertContains(t, env, "MAX_CACHED_MODULES=16\n")
+	assertContains(t, env, "MAX_CACHE_BYTES=67108864\n")
+	assertContains(t, env, "MODULE_CACHE_TTL=10m\n")
 }
 
 func TestInitWorkerRejectsInvalidMasterURL(t *testing.T) {

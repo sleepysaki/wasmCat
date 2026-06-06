@@ -44,6 +44,9 @@ func main() {
 		MaxPayloadBytes:    cfg.Limits.MaxPayloadBytes,
 		MaxOutputBytes:     cfg.Limits.MaxOutputBytes,
 		MaxConcurrentExecs: cfg.Limits.MaxConcurrentExecs,
+		MaxCachedModules:   cfg.Limits.MaxCachedModules,
+		MaxCacheBytes:      cfg.Limits.MaxCacheBytes,
+		ModuleCacheTTL:     cfg.Limits.ModuleCacheTTL,
 	})
 
 	server := &worker.WorkerServer{
@@ -84,6 +87,9 @@ func runInit(args []string) error {
 	maxPayloadBytes := flags.Int64("max-payload-bytes", 1<<20, "maximum request payload size")
 	maxOutputBytes := flags.Uint64("max-output-bytes", 1<<20, "maximum WASM output size")
 	maxConcurrentExecs := flags.Int("max-concurrent-execs", 4, "maximum concurrent executions")
+	maxCachedModules := flags.Int("max-cached-modules", 128, "maximum compiled modules kept in worker cache")
+	maxCacheBytes := flags.Int64("max-cache-bytes", 256<<20, "maximum raw WASM bytes represented by worker cache")
+	moduleCacheTTL := flags.String("module-cache-ttl", "30m", "maximum age for compiled module cache entries")
 	force := flags.Bool("force", false, "overwrite existing generated files")
 
 	if err := flags.Parse(args); err != nil {
@@ -109,6 +115,9 @@ func runInit(args []string) error {
 		MaxPayloadBytes:    *maxPayloadBytes,
 		MaxOutputBytes:     uint32(*maxOutputBytes),
 		MaxConcurrentExecs: *maxConcurrentExecs,
+		MaxCachedModules:   *maxCachedModules,
+		MaxCacheBytes:      *maxCacheBytes,
+		ModuleCacheTTL:     *moduleCacheTTL,
 		Force:              *force,
 	})
 	if err != nil {

@@ -40,7 +40,7 @@ The core responsibility is to execute WASM modules on registered workers without
 3. Normal startup calls `logging.Configure("worker")`.
 4. `signal.NotifyContext` creates a cancellable root context.
 5. `config.LoadWorker` reads worker identity, master URL, cert path, heartbeat interval, and execution limits.
-6. `worker.NewWasmEngineWithLimits` creates a wazero runtime, compiled module cache, mutex, and execution semaphore.
+6. `worker.NewWasmEngineWithLimits` creates a wazero runtime, digest-aware compiled module cache, mutex, in-flight compile tracker, and execution semaphore.
 7. `WorkerServer` is constructed with the engine, node ID, and certificate directory.
 8. `StartTelemetry` runs in a goroutine, registering the worker with configured latitude/longitude and sending periodic CPU/RAM heartbeats over mTLS.
 9. `WorkerServer.Start` loads CA/worker certificates, starts an HTTPS server requiring client certificates, and blocks until shutdown or server error.
@@ -158,8 +158,8 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/worker/engine.go`
 
 - **Name & Responsibility:** Fetches, compiles, caches, instantiates, and executes WASM modules.
-- **State & Properties:** `wazero.Runtime`, compiled module cache, `sync.RWMutex`, `Limits`, and semaphore channel for concurrency.
-- **Interactions:** Worker invoke handler calls `Execute`; `FetchAndCache` downloads modules and compiles with wazero; memory helpers manage WASM memory.
+- **State & Properties:** `wazero.Runtime`, digest-aware compiled module cache entries, cache byte counter, in-flight compile tracker, `sync.RWMutex`, `Limits`, and semaphore channel for concurrency.
+- **Interactions:** Worker invoke handler calls `ExecuteWithDigest`; `FetchAndCacheWithDigest` downloads modules and compiles with wazero; memory helpers manage WASM memory.
 
 ### `internal/worker/memory.go`
 
@@ -185,7 +185,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **`.github/workflows/ci.yml`:** Pull request and main branch quality gates.
 - **`.github/workflows/release.yml`:** Tag-triggered native release publishing.
 - **`packaging/systemd/*`:** Service and env templates for Linux hosts.
-- **`tests/*`:** Go tests live outside production package directories and cover config, bootstrap, gateway, dispatcher, worker server, limits, engine behavior, and an in-memory master-to-worker execution path.
+- **`tests/*`:** Go tests live outside production package directories and cover config, bootstrap, gateway, dispatcher, worker server, limits, cache lifecycle, engine behavior, and an in-memory master-to-worker execution path.
 
 ## 3. Comprehensive API & Function Reference
 
@@ -332,7 +332,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** None.
 - **Return Values:** `Limits`.
-- **Error Handling:** Invalid `EXECUTION_TIMEOUT`, `MODULE_FETCH_TIMEOUT`, `MAX_MODULE_BYTES`, `MAX_PAYLOAD_BYTES`, `MAX_OUTPUT_BYTES`, or `MAX_CONCURRENT_EXECS`.
+- **Error Handling:** Invalid `EXECUTION_TIMEOUT`, `MODULE_FETCH_TIMEOUT`, `MAX_MODULE_BYTES`, `MAX_PAYLOAD_BYTES`, `MAX_OUTPUT_BYTES`, `MAX_CONCURRENT_EXECS`, `MAX_CACHED_MODULES`, `MAX_CACHE_BYTES`, or `MODULE_CACHE_TTL`.
 - **Side Effects:** Reads process environment.
 
 ##### `func stringEnv(name string, fallback string) string`
@@ -466,7 +466,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 ##### `func (r ExecutionRequest) Validate() error`
 
-- **Parameters:** Receiver containing `ModuleName`, `ModuleURL`, and `ModuleRegistryURL`.
+- **Parameters:** Receiver containing `ModuleName`, `ModuleURL`, `ModuleRegistryURL`, and optional `ModuleDigest`.
 - **Return Values:** Nil when `ModuleName` is set and either module URL field is present.
 - **Error Handling:** Returns missing field errors.
 - **Side Effects:** None.
@@ -760,17 +760,42 @@ The core responsibility is to execute WASM modules on registered workers without
 
 ##### `func (e *WasmEngine) FetchAndCache(ctx context.Context, moduleName, moduleURL string, bearerToken string) error`
 
-- **Parameters:** Module cache key, module URL, optional bearer token.
+- **Parameters:** Module name, module URL, optional bearer token. Uses URL-aware fallback cache identity when no digest is supplied.
 - **Return Values:** Nil if module is already cached or fetched and compiled.
 - **Error Handling:** Missing URL on cache miss, request creation, network errors, non-200 status, read errors, module too large, wazero compile errors.
 - **Side Effects:** HTTP GET module bytes, optional Authorization header, compiles WASM, mutates cache.
 
+##### `func (e *WasmEngine) FetchAndCacheWithDigest(ctx context.Context, moduleName, moduleURL string, moduleDigest string, bearerToken string) error`
+
+- **Parameters:** Module name, URL, immutable digest when available, optional bearer token.
+- **Return Values:** Nil if the digest-aware key is cached or fetched and compiled.
+- **Error Handling:** Same as `FetchAndCache`.
+- **Side Effects:** May coalesce with an in-flight compile, insert a cache entry, and evict expired/LRU entries.
+
 ##### `func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL string, payload string, bearerToken string) (result string, err error)`
 
-- **Parameters:** Module cache key, URL, input payload string, optional bearer token.
+- **Parameters:** Module name, URL, input payload string, optional bearer token.
 - **Return Values:** WASM output string.
 - **Error Handling:** Payload too large, capacity exhausted, context cancellation, fetch/compile errors, missing cache entry, instantiate errors, memory write/read errors, missing `run`, `run` call failure, empty result, output too large.
 - **Side Effects:** May download/compile/cache module, instantiate module, call WASM code, log execution events.
+
+##### `func (e *WasmEngine) ExecuteWithDigest(ctx context.Context, moduleName string, moduleURL string, moduleDigest string, payload string, bearerToken string) (result string, err error)`
+
+- **Parameters:** Module name, URL, immutable digest when available, input payload string, optional bearer token.
+- **Return Values:** WASM output string.
+- **Error Handling:** Same as `Execute`.
+- **Side Effects:** Uses digest-aware cache lookup before instantiating and running the module.
+
+##### `func (e *WasmEngine) CacheStats() ModuleCacheStats`
+
+- **Return Values:** Current cache entry count, raw byte count, max entries, and max bytes.
+- **Side Effects:** None.
+
+##### `func (e *WasmEngine) ClearCache(ctx context.Context)`
+
+- **Parameters:** Context used when closing compiled modules.
+- **Return Values:** None.
+- **Side Effects:** Closes and removes all compiled module cache entries.
 
 ##### `func Allocate(ctx context.Context, mod api.Module, size uint32) (uint32, error)`
 
@@ -884,6 +909,9 @@ The core responsibility is to execute WASM modules on registered workers without
 | `MAX_PAYLOAD_BYTES` | `1048576` | integer bytes | Maximum payload size before execution. |
 | `MAX_OUTPUT_BYTES` | `1048576` | uint32 bytes | Maximum output bytes read from WASM memory. |
 | `MAX_CONCURRENT_EXECS` | `4` | integer | Worker-local execution concurrency limit. |
+| `MAX_CACHED_MODULES` | `128` | integer | Maximum compiled modules kept in worker cache. |
+| `MAX_CACHE_BYTES` | `268435456` | integer bytes | Maximum raw WASM bytes represented by worker cache entries. |
+| `MODULE_CACHE_TTL` | `30m` | Go duration | Maximum age for a compiled module cache entry. |
 
 ### Init Command Configuration
 
@@ -976,7 +1004,7 @@ output_len = uint32(result)
 - `WasmEngine.cache` is protected by `sync.RWMutex`.
 - Worker execution concurrency is capped by `WasmEngine.sem`, a buffered channel sized to `MaxConcurrentExecs`.
 - Each execution instantiates a fresh WASM module instance, so request memory is not shared between invocations.
-- The compiled module cache is process-local and has no eviction policy.
+- The compiled module cache is process-local, digest-aware, and evicted by TTL, entry count, and raw byte budget.
 
 ### Edge Cases and Limitations
 
@@ -985,8 +1013,8 @@ output_len = uint32(result)
 - **Registry cleanup age is fixed:** `Registry.Cleanup` removes nodes older than 30 seconds. `CLEANUP_INTERVAL` controls how often cleanup runs, not the expiration age.
 - **ACR token generation is uncached:** Each ACR dispatch can perform Azure credential lookup and token exchange.
 - **HTTP clients generally rely on context cancellation:** Dispatcher and ACR clients do not set explicit `http.Client.Timeout`; callers must provide bounded contexts.
-- **Module cache key is `moduleName`:** If the same `moduleName` points to a new URL or digest, the worker keeps using the cached compiled module until restart.
-- **No module cache eviction:** Compiled modules can accumulate for the life of the worker process.
+- **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
+- **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
 - **Duplicate fetch race:** Two concurrent first-time requests for the same module can both download and compile; only one compiled module is stored.
 - **Execution time field is not populated:** `ExecutionResponse.ExecutionTimeMs` exists but worker currently returns only `Result`; dispatcher logs duration separately.
 - **Health/readiness require mTLS:** Because TLS client auth is configured at server level, probes must present valid client certificates unless TLS routing changes.
@@ -1006,7 +1034,7 @@ output_len = uint32(result)
 - Set worker coordinates explicitly so distance scheduling has meaningful data.
 - Set capacity thresholds to prevent overloaded workers from receiving new executions.
 - Ensure `WORKER_ADVERTISE_ADDRESS` is reachable from the master.
-- Use immutable `ModuleName` values or include digest/version in the name to avoid stale worker caches.
+- Prefer immutable module digests so workers can distinguish changed module content even when names or tags are reused.
 - Keep `MAX_CONCURRENT_EXECS` aligned with CPU and memory capacity of each worker host.
 - Add mTLS-capable health checks in service monitoring.
 - For ACR deployments, run the master with a managed identity or service principal with repository pull permission.
