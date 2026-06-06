@@ -10,7 +10,8 @@ Use this plan when validating that the orchestrator works both as separate compo
 2. Run `go vet ./...` to catch suspicious code patterns that compile but may behave incorrectly.
 3. Run `go build ./...` to confirm both command binaries and internal packages compile together.
 4. Run the explicit `-coverpkg` command below to measure coverage against production packages even though tests live in `tests/`.
-5. Run the native build script before release packaging to confirm generated binaries and checksums can be produced without Docker.
+5. Run the process smoke test to prove real master and worker binaries can execute together over mTLS.
+6. Run the native build script before release packaging to confirm generated binaries and checksums can be produced without Docker.
 
 ## Test Layers
 
@@ -57,6 +58,18 @@ Run only integration tests:
 go test ./tests/integration
 ```
 
+## Smoke Tests
+
+Smoke tests validate the real runtime shape. `tests/smoke` builds temporary master and worker binaries, starts them on local ports, lets the master generate temporary development mTLS certificates, starts worker telemetry, and sends a real `/api/v1/execute` request through the master to the worker.
+
+Run only smoke tests:
+
+```powershell
+go test ./tests/smoke
+```
+
+The smoke test is intentionally heavier than unit tests. It catches issues that handler-only tests miss, such as bad environment wiring, certificate path mismatches, port startup failures, telemetry registration failures, and binary startup regressions.
+
 ## Supporting Checks
 
 Run these before a release or pull request:
@@ -67,6 +80,7 @@ $env:GOMODCACHE='E:\wasmCat\.gomodcache'
 go test ./...
 go vet ./...
 go build ./...
+go test ./tests/smoke
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Version dev
 ```
 
