@@ -58,6 +58,7 @@ func TestDispatcherSetsExecutedOnNodeID(t *testing.T) {
 
 	dispatcher := newTestDispatcher(workerServer.URL)
 	resp, err := dispatcher.Dispatch(context.Background(), shared.ExecutionRequest{
+		RequestID:  "req-test-dispatch",
 		ModuleName: "echo",
 		ModuleURL:  "http://module.test/echo.wasm",
 	})
@@ -66,6 +67,9 @@ func TestDispatcherSetsExecutedOnNodeID(t *testing.T) {
 	}
 	if resp.ExecutedOnNodeID != "worker-test" {
 		t.Fatalf("expected executed node worker-test, got %q", resp.ExecutedOnNodeID)
+	}
+	if resp.RequestID != "req-test-dispatch" {
+		t.Fatalf("expected request id fallback, got %q", resp.RequestID)
 	}
 }
 
@@ -93,6 +97,96 @@ func TestGatewayReturnsJSONErrorForInvalidExecutionRequest(t *testing.T) {
 	}
 	if errResp.Code != "invalid_execution_request" {
 		t.Fatalf("expected invalid_execution_request code, got %q", errResp.Code)
+	}
+}
+
+func TestGatewayGeneratesRequestIDBeforeDispatch(t *testing.T) {
+	var forwarded shared.ExecutionRequest
+	workerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&forwarded); err != nil {
+			t.Fatalf("decode forwarded request: %v", err)
+		}
+		shared.WriteJSON(w, http.StatusOK, shared.ExecutionResponse{
+			RequestID: forwarded.RequestID,
+			Result:    "ok",
+		})
+	}))
+	defer workerServer.Close()
+
+	registry := master.NewRegistry()
+	registry.RegisterWorker(shared.WorkerNode{
+		ID:        "worker-test",
+		IPAddress: workerServer.URL,
+	})
+	gateway := &master.Gateway{
+		Registry: registry,
+		Dispatcher: &master.Dispatcher{
+			Registry:  registry,
+			Scheduler: &master.Scheduler{},
+			Client:    http.DefaultClient,
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute", strings.NewReader(`{"module_name":"echo","module_url":"http://module.test/echo.wasm","payload":"hello"}`))
+	rec := httptest.NewRecorder()
+
+	gateway.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d with body %s", rec.Code, rec.Body.String())
+	}
+	if forwarded.RequestID == "" {
+		t.Fatal("expected generated request id to be forwarded")
+	}
+
+	var response shared.ExecutionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode execution response: %v", err)
+	}
+	if response.RequestID != forwarded.RequestID {
+		t.Fatalf("expected response request id %q, got %q", forwarded.RequestID, response.RequestID)
+	}
+}
+
+func TestGatewayPreservesClientRequestID(t *testing.T) {
+	const requestID = "client-request-123"
+	var forwarded shared.ExecutionRequest
+	workerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&forwarded); err != nil {
+			t.Fatalf("decode forwarded request: %v", err)
+		}
+		shared.WriteJSON(w, http.StatusOK, shared.ExecutionResponse{
+			RequestID: forwarded.RequestID,
+			Result:    "ok",
+		})
+	}))
+	defer workerServer.Close()
+
+	registry := master.NewRegistry()
+	registry.RegisterWorker(shared.WorkerNode{
+		ID:        "worker-test",
+		IPAddress: workerServer.URL,
+	})
+	gateway := &master.Gateway{
+		Registry: registry,
+		Dispatcher: &master.Dispatcher{
+			Registry:  registry,
+			Scheduler: &master.Scheduler{},
+			Client:    http.DefaultClient,
+		},
+	}
+
+	body := `{"request_id":"` + requestID + `","module_name":"echo","module_url":"http://module.test/echo.wasm","payload":"hello"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	gateway.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d with body %s", rec.Code, rec.Body.String())
+	}
+	if forwarded.RequestID != requestID {
+		t.Fatalf("expected forwarded request id %q, got %q", requestID, forwarded.RequestID)
 	}
 }
 

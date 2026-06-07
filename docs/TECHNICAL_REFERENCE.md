@@ -48,7 +48,7 @@ The core responsibility is to execute WASM modules on registered workers without
 #### Execution request lifecycle
 
 1. Client sends JSON to `POST /api/v1/execute` on the master.
-2. `Gateway.handleExecute` decodes `shared.ExecutionRequest` and calls `ExecutionRequest.Validate`.
+2. `Gateway.handleExecute` decodes `shared.ExecutionRequest`, calls `ExecutionRequest.Validate`, and preserves or creates `request_id`.
 3. `Dispatcher.Dispatch` normalizes module URL fields.
 4. If the URL points at `*.azurecr.io`, the dispatcher:
    - parses the ACR reference,
@@ -58,10 +58,10 @@ The core responsibility is to execute WASM modules on registered workers without
    - rewrites the request to the layer blob URL.
 5. The dispatcher reads active workers from `Registry.GetActiveWorkers`.
 6. `Scheduler.SelectWorker` filters out workers below configured free CPU/RAM thresholds, then chooses the nearest remaining worker by latitude/longitude.
-7. `Dispatcher.forwardToWorker` sends the request to `https://<worker>/invoke` over mTLS.
+7. `Dispatcher.forwardToWorker` sends the request, including `request_id`, to `https://<worker>/invoke` over mTLS.
 8. `WorkerServer.handleInvoke` limits request body size, decodes and validates the request, then calls `WasmEngine.Execute`.
 9. `WasmEngine.Execute` enforces payload and concurrency limits, fetches/compiles the module if needed, instantiates a fresh module instance, writes payload bytes into WASM memory, calls exported `run(ptr, len)`, reads output bytes, and returns a string.
-10. Worker returns `shared.ExecutionResponse`; master fills `ExecutedOnNodeID` and returns it to the client.
+10. Worker returns `shared.ExecutionResponse` with `request_id` and `execution_time_ms`; master fills `ExecutedOnNodeID` if needed and returns it to the client.
 
 ## 2. Component & Module Breakdown
 
@@ -104,7 +104,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/shared/models.go`
 
 - **Name & Responsibility:** Defines JSON models shared by master and worker.
-- **State & Properties:** `WorkerNode`, `Heartbeat`, `DrainRequest`, worker state constants, `ExecutionRequest`, `ExecutionResponse`, `APIResponse`, `ErrorResponse`, `HealthResponse`, and metrics response models.
+- **State & Properties:** `WorkerNode`, `Heartbeat`, `DrainRequest`, worker state constants, `ExecutionRequest`, `ExecutionResponse`, request ID helpers, `APIResponse`, `ErrorResponse`, `HealthResponse`, and metrics response models.
 - **Interactions:** All HTTP request/response handlers use these models.
 
 ### `internal/shared/http.go`
@@ -514,9 +514,29 @@ The core responsibility is to execute WASM modules on registered workers without
 
 ##### `func (r ExecutionRequest) Validate() error`
 
-- **Parameters:** Receiver containing `ModuleName`, `ModuleURL`, `ModuleRegistryURL`, and optional `ModuleDigest`.
-- **Return Values:** Nil when `ModuleName` is set and either module URL field is present.
-- **Error Handling:** Returns missing field errors.
+- **Parameters:** Receiver containing optional `RequestID`, `ModuleName`, `ModuleURL`, `ModuleRegistryURL`, and optional `ModuleDigest`.
+- **Return Values:** Nil when `RequestID` is valid, `ModuleName` is set, and either module URL field is present.
+- **Error Handling:** Returns invalid request ID or missing field errors.
+- **Side Effects:** None.
+
+##### `func NewRequestID() (string, error)`
+
+- **Return Values:** Generated `req_<32 hex characters>` request ID.
+- **Error Handling:** Returns crypto-random read errors.
+- **Side Effects:** Reads from the operating system random source.
+
+##### `func EnsureRequestID(requestID string) (string, error)`
+
+- **Parameters:** Optional client-provided request ID.
+- **Return Values:** Trimmed client ID when provided and valid, otherwise a generated ID.
+- **Error Handling:** Invalid client ID or random generation errors.
+- **Side Effects:** May read from the operating system random source.
+
+##### `func ValidateRequestID(requestID string) error`
+
+- **Parameters:** Optional request ID.
+- **Return Values:** Nil for empty IDs or valid IDs up to 128 characters.
+- **Error Handling:** Rejects IDs with unsupported characters or excessive length.
 - **Side Effects:** None.
 
 ##### `func WriteJSON(w http.ResponseWriter, status int, value any)`
@@ -593,7 +613,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Parameters:** JSON `shared.ExecutionRequest`.
 - **Return Values:** 200 `ExecutionResponse` on success.
 - **Error Handling:** 400 invalid JSON or validation failure; 503 dispatch failure.
-- **Side Effects:** Triggers scheduling, ACR network calls, and worker network call.
+- **Side Effects:** Validates or creates `request_id`, triggers scheduling, ACR network calls, and worker network call.
 
 ##### `func NewRegistry() *Registry`
 
@@ -664,12 +684,12 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Parameters:** Request context and execution request.
 - **Return Values:** Worker execution response.
 - **Error Handling:** ACR parse/token/manifest errors, no active workers, scheduler errors, worker forwarding errors.
-- **Side Effects:** May call Azure identity/ACR endpoints, reads registry, sends mTLS HTTP request to worker, logs dispatch events.
+- **Side Effects:** May call Azure identity/ACR endpoints, reads registry, sends mTLS HTTP request to worker, logs dispatch events with `request_id`.
 
 ##### `func (d *Dispatcher) forwardToWorker(ctx context.Context, node shared.WorkerNode, req shared.ExecutionRequest) (shared.ExecutionResponse, error)`
 
 - **Parameters:** Context, selected worker, execution request.
-- **Return Values:** Decoded worker response with `ExecutedOnNodeID` set.
+- **Return Values:** Decoded worker response with `ExecutedOnNodeID` set and `RequestID` preserved when the worker omits it.
 - **Error Handling:** JSON marshal, mTLS client creation, request creation, network failure, non-2xx worker response, JSON decode failure.
 - **Side Effects:** Network I/O to worker.
 
@@ -810,7 +830,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request)`
 
 - **Parameters:** JSON execution request.
-- **Return Values:** JSON execution response with `Result`.
+- **Return Values:** JSON execution response with `RequestID`, `Result`, `ExecutionTimeMs`, and `ExecutedOnNodeID`.
 - **Error Handling:** 400 invalid body/validation failure/execution failure.
 - **Side Effects:** Applies HTTP body limit, executes module through engine.
 
@@ -1100,7 +1120,7 @@ output_len = uint32(result)
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
 - **Cold fetch coalescing is process-local:** Concurrent cold requests for the same cache key share one download/compile inside a worker process. Separate workers still compile independently.
-- **Execution time field is not populated:** `ExecutionResponse.ExecutionTimeMs` exists but worker currently returns only `Result`; dispatcher logs duration separately.
+- **Request IDs are correlation only:** `request_id` is generated or propagated for tracing. It is not stored and does not provide idempotency.
 - **Health/readiness require mTLS:** Because TLS client auth is configured at server level, probes must present valid client certificates unless TLS routing changes.
 - **Worker invoke nil engine risk:** Readiness checks for nil engine, but `/invoke` accesses `s.Engine.Limits()` before a nil check. Normal startup always sets the engine.
 - **Development cert generation overwrites at runtime:** `GenerateCAAndCerts` uses `os.Create`. Production should set `AUTO_GENERATE_CERTS=false`; bootstrap protects generated files unless `--force` is used.

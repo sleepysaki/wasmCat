@@ -61,6 +61,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) 
 		return shared.ExecutionResponse{}, err
 	}
 	slog.Info("worker selected",
+		"request_id", req.RequestID,
 		"module_name", req.ModuleName,
 		"worker_id", targetNode.ID,
 		"worker_address", targetNode.IPAddress,
@@ -70,6 +71,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) 
 	resp, err := d.forwardToWorker(ctx, targetNode, req)
 	if err != nil {
 		slog.Error("dispatch failed",
+			"request_id", req.RequestID,
 			"module_name", req.ModuleName,
 			"worker_id", targetNode.ID,
 			"duration_ms", time.Since(start).Milliseconds(),
@@ -79,6 +81,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) 
 	}
 
 	slog.Info("dispatch completed",
+		"request_id", req.RequestID,
 		"module_name", req.ModuleName,
 		"worker_id", targetNode.ID,
 		"duration_ms", time.Since(start).Milliseconds(),
@@ -134,6 +137,9 @@ func (d *Dispatcher) forwardToWorker(ctx context.Context, node shared.WorkerNode
 		return shared.ExecutionResponse{}, fmt.Errorf("decode worker response: %w", err)
 	}
 	execResp.ExecutedOnNodeID = node.ID
+	if execResp.RequestID == "" {
+		execResp.RequestID = req.RequestID
+	}
 
 	return execResp, nil
 }

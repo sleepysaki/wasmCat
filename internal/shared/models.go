@@ -1,13 +1,17 @@
 package shared
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 )
 
 const (
 	WorkerStateReady    = "ready"
 	WorkerStateDraining = "draining"
+	RequestIDMaxLength  = 128
 )
 
 // Master node stores these in State Registry
@@ -38,6 +42,10 @@ type DrainRequest struct {
 
 // ExecutionRequest: payload sent from the End-User to the Master, then forwarded from the Master to the chosen Worker
 type ExecutionRequest struct {
+	// RequestID is the stable identity for one execution request.
+	// Clients may provide it for correlation, or the master creates one before dispatching.
+	RequestID string `json:"request_id,omitempty"`
+
 	// The target Wasm module to run
 	ModuleName string `json:"module_name"`
 
@@ -56,6 +64,9 @@ type ExecutionRequest struct {
 }
 
 func (r ExecutionRequest) Validate() error {
+	if err := ValidateRequestID(r.RequestID); err != nil {
+		return err
+	}
 	if r.ModuleName == "" {
 		return fmt.Errorf("module_name is required")
 	}
@@ -66,9 +77,60 @@ func (r ExecutionRequest) Validate() error {
 	return nil
 }
 
+func NewRequestID() (string, error) {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "", fmt.Errorf("generate request id: %w", err)
+	}
+
+	return "req_" + hex.EncodeToString(bytes[:]), nil
+}
+
+func EnsureRequestID(requestID string) (string, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return NewRequestID()
+	}
+	if err := ValidateRequestID(requestID); err != nil {
+		return "", err
+	}
+
+	return requestID, nil
+}
+
+func ValidateRequestID(requestID string) error {
+	if requestID == "" {
+		return nil
+	}
+	if len(requestID) > RequestIDMaxLength {
+		return fmt.Errorf("request_id must be at most %d characters", RequestIDMaxLength)
+	}
+	for _, char := range requestID {
+		if char >= 'a' && char <= 'z' {
+			continue
+		}
+		if char >= 'A' && char <= 'Z' {
+			continue
+		}
+		if char >= '0' && char <= '9' {
+			continue
+		}
+		switch char {
+		case '_', '-', '.', ':':
+			continue
+		default:
+			return fmt.Errorf("request_id contains unsupported character %q", char)
+		}
+	}
+
+	return nil
+}
+
 // ExecutionResponse is what the Worker returns to the Master,
 // and what the Master returns to the End-User.
 type ExecutionResponse struct {
+	RequestID string `json:"request_id,omitempty"`
+
 	// The actual output returned from the Wasm linear memory
 	Result string `json:"result"`
 

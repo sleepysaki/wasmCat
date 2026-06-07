@@ -88,6 +88,12 @@ func TestMasterGatewayDispatchesThroughWorkerEngine(t *testing.T) {
 	if response.ExecutedOnNodeID != "worker-integration" {
 		t.Fatalf("expected worker-integration, got %q", response.ExecutedOnNodeID)
 	}
+	if response.RequestID == "" {
+		t.Fatal("expected generated request id in execution response")
+	}
+	if response.ExecutionTimeMs <= 0 {
+		t.Fatalf("expected positive execution time, got %f", response.ExecutionTimeMs)
+	}
 }
 
 func bytesReader(data []byte) *bytes.Reader {

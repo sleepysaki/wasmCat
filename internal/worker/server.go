@@ -67,6 +67,8 @@ func (s *WorkerServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 // Logic handler
 func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
 	// Limit the HTTP body before JSON decoding.
 	// The payload limit covers the user data, and the extra bytes leave room for JSON field names and module metadata.
 	r.Body = http.MaxBytesReader(w, r.Body, s.Engine.Limits().MaxPayloadBytes+4096)
@@ -85,21 +87,34 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
 		return
 	}
+	requestID, err := shared.EnsureRequestID(req.RequestID)
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+		return
+	}
+	req.RequestID = requestID
 
 	// Now that JSON is valid, ask the engine to run the module.
 	// r.Context() connects execution to the HTTP request, so cancellation can flow downward.
+	slog.Info("worker execution request received", "request_id", req.RequestID, "module_name", req.ModuleName, "module_digest", req.ModuleDigest)
 	result, err := s.Engine.ExecuteWithDigest(r.Context(), req.ModuleName, req.ModuleURL, req.ModuleDigest, req.Payload, req.JITBearerToken)
 	if err != nil {
 		s.metrics().IncWorkerExecutionFailure()
+		slog.Error("worker execution request failed", "request_id", req.RequestID, "module_name", req.ModuleName, "duration_ms", time.Since(start).Milliseconds(), "error", err)
 		shared.WriteError(w, http.StatusBadRequest, "execution_failed", err)
 		return
 	}
 	s.metrics().IncWorkerExecutionSuccess()
+	durationMs := float64(time.Since(start).Microseconds()) / 1000
 
 	// Wrap the output in the shared response model so the master and user see the same shape.
 	resp := shared.ExecutionResponse{
-		Result: result,
+		RequestID:        req.RequestID,
+		Result:           result,
+		ExecutionTimeMs:  durationMs,
+		ExecutedOnNodeID: s.NodeID,
 	}
+	slog.Info("worker execution request completed", "request_id", req.RequestID, "module_name", req.ModuleName, "duration_ms", durationMs)
 	shared.WriteJSON(w, http.StatusOK, resp)
 }
 

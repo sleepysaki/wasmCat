@@ -210,6 +210,12 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
 		return
 	}
+	requestID, err := shared.EnsureRequestID(req.RequestID)
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+		return
+	}
+	req.RequestID = requestID
 
 	// Tell the Dispatcher to find a worker and run the code
 	result, err := g.Dispatcher.Dispatch(r.Context(), req)
