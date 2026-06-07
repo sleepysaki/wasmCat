@@ -133,6 +133,13 @@ CERT_DIR=/etc/wasmcat/certs
 MASTER_PORT=7270
 MIN_WORKER_CPU_FREE=10
 MIN_WORKER_RAM_FREE_MB=256
+EXECUTE_CLIENT_ALLOWLIST=
+```
+
+For production, set `EXECUTE_CLIENT_ALLOWLIST` to the client certificate common names or DNS SANs allowed to submit execution requests. Example:
+
+```text
+EXECUTE_CLIENT_ALLOWLIST=wasmcat-client,deployer.internal
 ```
 
 Mount or copy these files into `/etc/wasmcat/certs`:

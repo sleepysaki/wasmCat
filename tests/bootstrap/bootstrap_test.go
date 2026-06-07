@@ -20,6 +20,7 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 		CleanupInterval:    "30s",
 		MinWorkerCPUFree:   10,
 		MinWorkerRAMFreeMB: 256,
+		ExecuteClientIDs:   "wasmcat-client,deployer.internal",
 		DevWorkerID:        "worker-test-01",
 	})
 	if err != nil {
@@ -41,6 +42,7 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 	assertContains(t, env, "CLEANUP_INTERVAL=30s\n")
 	assertContains(t, env, "MIN_WORKER_CPU_FREE=10\n")
 	assertContains(t, env, "MIN_WORKER_RAM_FREE_MB=256\n")
+	assertContains(t, env, "EXECUTE_CLIENT_ALLOWLIST=wasmcat-client,deployer.internal\n")
 }
 
 func TestInitMasterRefusesToOverwriteEnvWithoutForce(t *testing.T) {

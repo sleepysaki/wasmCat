@@ -98,6 +98,7 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	t.Setenv("DEV_WORKER_ID", "worker-prod-01")
 	t.Setenv("MIN_WORKER_CPU_FREE", "15.5")
 	t.Setenv("MIN_WORKER_RAM_FREE_MB", "512")
+	t.Setenv("EXECUTE_CLIENT_ALLOWLIST", "wasmcat-client, deployer.internal ")
 
 	cfg, err := config.LoadMaster()
 	if err != nil {
@@ -118,6 +119,9 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	}
 	if cfg.MinWorkerRAMFreeMB != 512 {
 		t.Fatalf("expected min RAM 512, got %f", cfg.MinWorkerRAMFreeMB)
+	}
+	if len(cfg.ExecuteClientIDs) != 2 || cfg.ExecuteClientIDs[0] != "wasmcat-client" || cfg.ExecuteClientIDs[1] != "deployer.internal" {
+		t.Fatalf("unexpected execute client allowlist: %+v", cfg.ExecuteClientIDs)
 	}
 }
 

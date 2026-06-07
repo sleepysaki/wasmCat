@@ -62,9 +62,10 @@ func main() {
 
 	// Create the API Gateway, need the Registry (to handle /register and /heartbeat) and the Dispatcher (to handle /api/v1/execute)
 	gateway := &master.Gateway{
-		Registry:   reg,
-		Dispatcher: dispatch,
-		CertDir:    cfg.CertDir,
+		Registry:         reg,
+		Dispatcher:       dispatch,
+		CertDir:          cfg.CertDir,
+		ExecuteClientIDs: cfg.ExecuteClientIDs,
 	}
 
 	// Background Processes
@@ -120,6 +121,7 @@ func runInit(args []string) error {
 	cleanupInterval := flags.String("cleanup-interval", "15s", "registry cleanup interval")
 	minWorkerCPUFree := flags.Float64("min-worker-cpu-free", 0, "minimum free CPU percent required for scheduling")
 	minWorkerRAMFreeMB := flags.Float64("min-worker-ram-free-mb", 0, "minimum free RAM in MiB required for scheduling")
+	executeClientAllowlist := flags.String("execute-client-allowlist", "", "comma-separated client certificate CN or DNS SAN values allowed to call /api/v1/execute")
 	devWorkerID := flags.String("dev-worker-id", "worker-vn-01", "worker ID used when generating development certificates")
 	devCerts := flags.Bool("dev-certs", false, "generate local development certificates")
 	force := flags.Bool("force", false, "overwrite existing generated files")
@@ -135,6 +137,7 @@ func runInit(args []string) error {
 		CleanupInterval:    *cleanupInterval,
 		MinWorkerCPUFree:   *minWorkerCPUFree,
 		MinWorkerRAMFreeMB: *minWorkerRAMFreeMB,
+		ExecuteClientIDs:   *executeClientAllowlist,
 		DevWorkerID:        *devWorkerID,
 		GenerateDevCerts:   *devCerts,
 		Force:              *force,

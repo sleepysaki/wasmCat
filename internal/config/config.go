@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,6 +28,7 @@ type MasterConfig struct {
 	CleanupInterval    time.Duration
 	MinWorkerCPUFree   float64
 	MinWorkerRAMFreeMB float64
+	ExecuteClientIDs   []string
 }
 
 type WorkerConfig struct {
@@ -67,9 +69,28 @@ func LoadMaster() (MasterConfig, error) {
 		CleanupInterval:    cleanupInterval,
 		MinWorkerCPUFree:   minWorkerCPUFree,
 		MinWorkerRAMFreeMB: minWorkerRAMFreeMB,
+		ExecuteClientIDs:   listEnv("EXECUTE_CLIENT_ALLOWLIST"),
 	}
 
 	return cfg, nil
+}
+
+func listEnv(name string) []string {
+	value := os.Getenv(name)
+	if value == "" {
+		return nil
+	}
+
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+
+	return values
 }
 
 func LoadWorker() (WorkerConfig, error) {

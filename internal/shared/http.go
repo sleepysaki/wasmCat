@@ -39,6 +39,8 @@ func PublicErrorMessage(code string) string {
 	switch code {
 	case "method_not_allowed":
 		return "HTTP method is not allowed for this endpoint."
+	case "execute_client_unauthorized":
+		return "Execution client is not authorized."
 	case "invalid_worker_data":
 		return "Invalid worker registration request."
 	case "invalid_heartbeat":

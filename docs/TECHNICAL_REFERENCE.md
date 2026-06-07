@@ -128,8 +128,8 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/master/gateway.go`
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
-- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, and `Gateway.Metrics`.
-- **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
+- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, and optional `Gateway.ExecuteClientIDs`.
+- **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain, validates execution client certificate identity when configured, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
 
 ### `internal/master/registry.go`
 
@@ -619,8 +619,15 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** JSON `shared.ExecutionRequest`.
 - **Return Values:** 200 `ExecutionResponse` on success.
-- **Error Handling:** 400 invalid JSON or validation failure; 503 dispatch failure.
-- **Side Effects:** Validates or creates `request_id`, triggers scheduling, ACR network calls, and worker network call.
+- **Error Handling:** 405 wrong method, 403 unauthorized execution client, 400 invalid JSON or validation failure, 503 dispatch failure.
+- **Side Effects:** Validates execution client certificate identity when configured, validates or creates `request_id`, triggers scheduling, ACR network calls, and worker network call.
+
+##### `func (g *Gateway) validateExecuteClientIdentity(r *http.Request) error`
+
+- **Parameters:** Incoming HTTP request.
+- **Return Values:** Nil when `ExecuteClientIDs` is empty or the peer certificate CN/DNS SAN matches an allowed identity.
+- **Error Handling:** Returns missing certificate or unauthorized certificate identity errors.
+- **Side Effects:** None.
 
 ##### `func NewRegistry() *Registry`
 
@@ -997,6 +1004,7 @@ The core responsibility is to execute WASM modules on registered workers without
 | `CLEANUP_INTERVAL` | `15s` | Go duration | Frequency for registry cleanup ticker. Cleanup removes workers older than 30 seconds. |
 | `MIN_WORKER_CPU_FREE` | `0` | float percentage | Minimum reported free CPU required before the scheduler can select a worker. |
 | `MIN_WORKER_RAM_FREE_MB` | `0` | float MiB | Minimum reported free RAM required before the scheduler can select a worker. |
+| `EXECUTE_CLIENT_ALLOWLIST` | empty | comma-separated certificate identities | Optional client certificate CN or DNS SAN allowlist for `/api/v1/execute`. Empty allows any trusted mTLS client. |
 
 ### Worker Environment Variables
 
@@ -1060,7 +1068,7 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | Master | `POST` | `/internal/register` | `WorkerNode` | `APIResponse` | 405 wrong method, 400 invalid JSON, 403 certificate identity mismatch. |
 | Master | `POST` | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 405 wrong method, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
 | Master | `POST` | `/internal/drain` | `DrainRequest` | `APIResponse` | 405 wrong method, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
-| Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 400 invalid JSON/request, 503 dispatch failure. |
+| Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 403 unauthorized execution client, 400 invalid JSON/request, 503 dispatch failure. |
 | Worker | `GET` | `/wasmcat/health` | none | `HealthResponse` | 405 wrong method, JSON encode failure only. |
 | Worker | `GET` | `/wasmcat/ready` | none | `HealthResponse` | 405 wrong method, 503 if engine is nil. |
 | Worker | `GET` | `/wasmcat/metrics` | none | `MetricsResponse` | 405 wrong method, JSON encode failure only. |
@@ -1132,7 +1140,7 @@ output_len = uint32(result)
 - **Development cert generation overwrites at runtime:** `GenerateCAAndCerts` uses `os.Create`. Production should set `AUTO_GENERATE_CERTS=false`; bootstrap protects generated files unless `--force` is used.
 - **Telemetry is host-level, not cgroup-level:** gopsutil reports host CPU and memory. It does not currently account for per-service cgroup quotas.
 - **No persistent state:** Registry and module cache are in memory. Master restart loses worker registry; worker restart loses compiled module cache.
-- **No authentication beyond mTLS:** There is no end-user authorization layer on `/api/v1/execute`; any valid client certificate trusted by the CA can call it.
+- **Execution authorization allowlist is optional:** If `EXECUTE_CLIENT_ALLOWLIST` is empty, any valid client certificate trusted by the CA can call `/api/v1/execute`.
 - **WASM ABI is narrow:** Modules must match the exact `memory`, `malloc`, and packed `run` ABI. WASI modules or modules with different host imports are not supported by the current engine path.
 
 ### Operational Recommendations

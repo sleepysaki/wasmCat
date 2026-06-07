@@ -23,6 +23,11 @@ type Gateway struct {
 	Dispatcher *Dispatcher
 	CertDir    string
 	Metrics    *shared.Metrics
+
+	// ExecuteClientIDs is optional. When empty, any trusted mTLS client can call
+	// /api/v1/execute. When set, the caller certificate must match one of these
+	// identities by common name or DNS SAN.
+	ExecuteClientIDs []string
 }
 
 // Constructor
@@ -228,6 +233,10 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	if !shared.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
+	if err := g.validateExecuteClientIdentity(r); err != nil {
+		shared.WriteError(w, http.StatusForbidden, "execute_client_unauthorized", err)
+		return
+	}
 
 	var req shared.ExecutionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -296,4 +305,31 @@ func validateWorkerPeerIdentity(r *http.Request, workerID string) error {
 
 func workerCertificateName(workerID string) string {
 	return "wasmcat-worker-" + workerID
+}
+
+func (g *Gateway) validateExecuteClientIdentity(r *http.Request) error {
+	if len(g.ExecuteClientIDs) == 0 {
+		return nil
+	}
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		return fmt.Errorf("execution client certificate is required")
+	}
+
+	cert := r.TLS.PeerCertificates[0]
+	for _, allowedID := range g.ExecuteClientIDs {
+		allowedID = strings.TrimSpace(allowedID)
+		if allowedID == "" {
+			continue
+		}
+		if cert.Subject.CommonName == allowedID {
+			return nil
+		}
+		for _, dnsName := range cert.DNSNames {
+			if dnsName == allowedID {
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("execution client certificate identity %q is not allowed", cert.Subject.CommonName)
 }

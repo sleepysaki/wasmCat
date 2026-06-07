@@ -3,6 +3,7 @@
 wasmCat reads runtime configuration from environment variables and keeps local-development defaults when values are not set.
 
 Module cache behavior is documented in [MODULE_CACHE_LIFECYCLE.md](MODULE_CACHE_LIFECYCLE.md).
+Execution client authorization is documented in [EXECUTION_AUTHORIZATION.md](EXECUTION_AUTHORIZATION.md).
 
 ## Master
 
@@ -15,6 +16,7 @@ Module cache behavior is documented in [MODULE_CACHE_LIFECYCLE.md](MODULE_CACHE_
 | `CLEANUP_INTERVAL` | `15s` | How often the master removes stale workers from the registry. |
 | `MIN_WORKER_CPU_FREE` | `0` | Minimum free CPU percentage required for a worker to receive new work. |
 | `MIN_WORKER_RAM_FREE_MB` | `0` | Minimum free RAM in MiB required for a worker to receive new work. |
+| `EXECUTE_CLIENT_ALLOWLIST` | empty | Comma-separated client certificate CN or DNS SAN values allowed to call `/api/v1/execute`. Empty means any trusted mTLS client can execute work. |
 
 ## Worker
 

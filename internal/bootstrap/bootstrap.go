@@ -18,6 +18,7 @@ type MasterOptions struct {
 	CleanupInterval    string
 	MinWorkerCPUFree   float64
 	MinWorkerRAMFreeMB float64
+	ExecuteClientIDs   string
 	DevWorkerID        string
 	GenerateDevCerts   bool
 	Force              bool
@@ -82,6 +83,7 @@ func InitMaster(options MasterOptions) (Result, error) {
 		{"CLEANUP_INTERVAL", options.CleanupInterval},
 		{"MIN_WORKER_CPU_FREE", strconv.FormatFloat(options.MinWorkerCPUFree, 'f', -1, 64)},
 		{"MIN_WORKER_RAM_FREE_MB", strconv.FormatFloat(options.MinWorkerRAMFreeMB, 'f', -1, 64)},
+		{"EXECUTE_CLIENT_ALLOWLIST", options.ExecuteClientIDs},
 	}
 
 	if err := writeEnvFile(configPath, values, options.Force); err != nil {

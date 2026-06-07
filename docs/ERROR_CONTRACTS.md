@@ -22,6 +22,7 @@ Handlers pass the real Go error to `shared.WriteError`. The function logs the ra
 | Code | Public Message |
 | --- | --- |
 | `method_not_allowed` | `HTTP method is not allowed for this endpoint.` |
+| `execute_client_unauthorized` | `Execution client is not authorized.` |
 | `invalid_worker_data` | `Invalid worker registration request.` |
 | `invalid_heartbeat` | `Invalid worker heartbeat request.` |
 | `invalid_drain_request` | `Invalid worker drain request.` |

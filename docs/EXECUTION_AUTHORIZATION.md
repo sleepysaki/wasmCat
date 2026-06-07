@@ -1,0 +1,45 @@
+# Execution Client Authorization
+
+The master always requires mTLS at the HTTPS server layer. `EXECUTE_CLIENT_ALLOWLIST` adds a second authorization check for `POST /api/v1/execute`.
+
+## Configuration
+
+Set `EXECUTE_CLIENT_ALLOWLIST` on the master to a comma-separated list of client certificate identities:
+
+```text
+EXECUTE_CLIENT_ALLOWLIST=wasmcat-client,deployer.internal
+```
+
+Each value is matched against the caller certificate common name or DNS SAN. Whitespace around commas is ignored.
+
+If the variable is empty, any client certificate trusted by the master CA can call `/api/v1/execute`. That preserves local development behavior but is not recommended for production.
+
+## Certificate Identity Examples
+
+Accepted by this configuration:
+
+```text
+EXECUTE_CLIENT_ALLOWLIST=wasmcat-client,deployer.internal
+```
+
+- certificate common name `wasmcat-client`
+- certificate DNS SAN `deployer.internal`
+
+Rejected:
+
+- worker certificate common name `wasmcat-worker-worker-us-01`
+- any trusted certificate with no matching common name or DNS SAN
+- requests without a client certificate when the allowlist is configured
+
+## Failure Contract
+
+Unauthorized execution clients receive:
+
+```json
+{
+  "error": "Execution client is not authorized.",
+  "code": "execute_client_unauthorized"
+}
+```
+
+The response does not expose the rejected certificate identity. The raw internal error is logged by the master.
