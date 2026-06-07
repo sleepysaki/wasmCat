@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+const (
+	WorkerStateReady    = "ready"
+	WorkerStateDraining = "draining"
+)
+
 // Master node stores these in State Registry
 type WorkerNode struct {
 	ID        string    `json:"id"`
@@ -14,6 +19,7 @@ type WorkerNode struct {
 	CPUFree   float64   `json:"cpu_free"`
 	RAMFreeMB float64   `json:"ram_free_mb"`
 	LastSeen  time.Time `json:"last_seen"`
+	State     string    `json:"state,omitempty"`
 }
 
 // Heartbeat: the payload sent every 5 seconds by the Worker to update its status
@@ -22,6 +28,10 @@ type Heartbeat struct {
 	NodeID    string  `json:"node_id"`
 	CPUFree   float64 `json:"cpu_free"`
 	RAMFreeMB float64 `json:"ram_free_mb"`
+}
+
+type DrainRequest struct {
+	NodeID string `json:"node_id"`
 }
 
 // EXECUTION MODELS (Data Plane)

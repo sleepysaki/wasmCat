@@ -21,7 +21,7 @@ Unit tests validate components in isolation:
 
 - `tests/bootstrap`: config file generation, overwrite protection, local cert generation.
 - `tests/config`: environment parsing and validation.
-- `tests/master`: ACR parsing, gateway errors, dispatcher errors, scheduler capacity filtering.
+- `tests/master`: ACR parsing, gateway errors, dispatcher errors, worker draining, scheduler capacity/state filtering.
 - `tests/shared`: shared HTTP client timeout defaults and safe public error contracts.
 - `tests/worker`: WASM engine execution, cache lifecycle, metrics, worker limits, worker health/readiness, JSON error handling.
 

@@ -39,6 +39,7 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("/wasmcat/metrics", g.handleMetrics)
 	mux.HandleFunc("/internal/register", g.handleRegister)
 	mux.HandleFunc("/internal/heartbeat", g.handleHeartbeat)
+	mux.HandleFunc("/internal/drain", g.handleDrain)
 	mux.HandleFunc("/api/v1/execute", g.handleExecute)
 	return logging.MiddlewareWithMetrics("master", mux, g.metrics())
 }
@@ -66,13 +67,15 @@ func (g *Gateway) handleReady(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gateway) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	activeWorkers := 0
+	workersByState := map[string]int{}
 	var oldestHeartbeatSeconds *int64
 	if g.Registry != nil {
 		activeWorkers = g.Registry.ActiveWorkerCount()
+		workersByState = g.Registry.WorkerStateCounts()
 		oldestHeartbeatSeconds = g.Registry.OldestHeartbeatAge(time.Now())
 	}
 
-	shared.WriteJSON(w, http.StatusOK, g.metrics().MasterSnapshot(activeWorkers, oldestHeartbeatSeconds))
+	shared.WriteJSON(w, http.StatusOK, g.metrics().MasterSnapshot(activeWorkers, workersByState, oldestHeartbeatSeconds))
 }
 
 func (g *Gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +122,28 @@ func (g *Gateway) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (g *Gateway) handleDrain(w http.ResponseWriter, r *http.Request) {
+	var req shared.DrainRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_drain_request", err)
+		return
+	}
+	if err := validateWorkerPeerIdentity(r, req.NodeID); err != nil {
+		shared.WriteError(w, http.StatusForbidden, "worker_identity_mismatch", err)
+		return
+	}
+
+	if err := g.Registry.DrainWorker(req.NodeID); err != nil {
+		shared.WriteError(w, http.StatusNotFound, "worker_not_found", err)
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, shared.APIResponse{
+		Status:  "success",
+		Message: "Worker marked as draining",
+	})
 }
 
 // Start the HTTP server and set up the routes for worker registration and heartbeat

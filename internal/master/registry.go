@@ -30,8 +30,11 @@ func (r *Registry) RegisterWorker(worker shared.WorkerNode) {
 	if worker.LastSeen.IsZero() {
 		worker.LastSeen = time.Now()
 	}
+	if worker.State == "" {
+		worker.State = shared.WorkerStateReady
+	}
 	r.workers[worker.ID] = worker
-	slog.Info("worker registered", "worker_id", worker.ID, "address", worker.IPAddress)
+	slog.Info("worker registered", "worker_id", worker.ID, "address", worker.IPAddress, "state", worker.State)
 }
 
 // Take the incoming worker, save to map with key=worker.ID
@@ -50,6 +53,9 @@ func (r *Registry) UpdateWorkerStatus(heartbeat shared.Heartbeat) error {
 	worker.CPUFree = heartbeat.CPUFree
 	worker.RAMFreeMB = heartbeat.RAMFreeMB
 	worker.LastSeen = time.Now()
+	if worker.State == "" {
+		worker.State = shared.WorkerStateReady
+	}
 	r.workers[heartbeat.NodeID] = worker
 	return nil
 }
@@ -65,11 +71,57 @@ func (r *Registry) GetActiveWorkers() []shared.WorkerNode {
 	return activeWorkers
 }
 
+func (r *Registry) GetSchedulableWorkers() []shared.WorkerNode {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	workers := make([]shared.WorkerNode, 0, len(r.workers))
+	for _, worker := range r.workers {
+		if worker.State == "" || worker.State == shared.WorkerStateReady {
+			workers = append(workers, worker)
+		}
+	}
+
+	return workers
+}
+
+func (r *Registry) DrainWorker(nodeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	worker, exists := r.workers[nodeID]
+	if !exists {
+		return fmt.Errorf("worker with ID %s not found in registry", nodeID)
+	}
+
+	worker.State = shared.WorkerStateDraining
+	worker.LastSeen = time.Now()
+	r.workers[nodeID] = worker
+	slog.Info("worker marked draining", "worker_id", nodeID)
+	return nil
+}
+
 func (r *Registry) ActiveWorkerCount() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	return len(r.workers)
+}
+
+func (r *Registry) WorkerStateCounts() map[string]int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	counts := make(map[string]int)
+	for _, worker := range r.workers {
+		state := worker.State
+		if state == "" {
+			state = shared.WorkerStateReady
+		}
+		counts[state]++
+	}
+
+	return counts
 }
 
 func (r *Registry) OldestHeartbeatAge(now time.Time) *int64 {

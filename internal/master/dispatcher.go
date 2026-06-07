@@ -51,9 +51,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) 
 		req.ModuleDigest = moduleDigest
 	}
 
-	workers := d.Registry.GetActiveWorkers()
+	workers := d.Registry.GetSchedulableWorkers()
 	if len(workers) == 0 {
-		return shared.ExecutionResponse{}, fmt.Errorf("no active workers available")
+		return shared.ExecutionResponse{}, fmt.Errorf("no schedulable workers available")
 	}
 
 	targetNode, err := d.Scheduler.SelectWorker(req.UserLat, req.UserLon, workers)

@@ -31,6 +31,8 @@ func PublicErrorMessage(code string) string {
 		return "Invalid worker registration request."
 	case "invalid_heartbeat":
 		return "Invalid worker heartbeat request."
+	case "invalid_drain_request":
+		return "Invalid worker drain request."
 	case "worker_identity_mismatch":
 		return "Worker certificate identity does not match the requested worker ID."
 	case "worker_not_found":

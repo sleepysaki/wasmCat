@@ -45,6 +45,7 @@ func StartTelemetryWithMetrics(ctx context.Context, masterURL string, nodeID str
 		select {
 		case <-ctx.Done():
 			// Context cancelled, exit the function
+			sendDrain(client, masterURL, nodeID)
 			slog.Info("telemetry stopped", "worker_id", nodeID)
 			return
 		case <-ticker.C:
@@ -53,6 +54,36 @@ func StartTelemetryWithMetrics(ctx context.Context, masterURL string, nodeID str
 			sendHeartbeat(ctx, client, masterURL, nodeID, metricsProvider)
 		}
 	}
+}
+
+func sendDrain(client *http.Client, masterURL string, nodeID string) {
+	drain := shared.DrainRequest{NodeID: nodeID}
+	data, err := json.Marshal(drain)
+	if err != nil {
+		slog.Error("drain marshal error", "worker_id", nodeID, "error", err)
+		return
+	}
+
+	endpoint := masterURL + "/internal/drain"
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(data))
+	if err != nil {
+		slog.Error("failed to build drain request", "worker_id", nodeID, "error", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.Error("failed to send drain request", "worker_id", nodeID, "master_url", masterURL, "error", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		slog.Warn("drain request rejected", "worker_id", nodeID, "status", resp.Status)
+		return
+	}
+	slog.Info("worker drain request sent", "worker_id", nodeID, "master_url", masterURL, "status", resp.StatusCode)
 }
 
 func newMTLSClient(certDir string, nodeID string) (*http.Client, error) {

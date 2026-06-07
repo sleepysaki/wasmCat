@@ -104,7 +104,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/shared/models.go`
 
 - **Name & Responsibility:** Defines JSON models shared by master and worker.
-- **State & Properties:** `WorkerNode`, `Heartbeat`, `ExecutionRequest`, `ExecutionResponse`, `APIResponse`, `ErrorResponse`, `HealthResponse`, and metrics response models.
+- **State & Properties:** `WorkerNode`, `Heartbeat`, `DrainRequest`, worker state constants, `ExecutionRequest`, `ExecutionResponse`, `APIResponse`, `ErrorResponse`, `HealthResponse`, and metrics response models.
 - **Interactions:** All HTTP request/response handlers use these models.
 
 ### `internal/shared/http.go`
@@ -129,17 +129,17 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
 - **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, and `Gateway.Metrics`.
-- **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
+- **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
 
 ### `internal/master/registry.go`
 
 - **Name & Responsibility:** In-memory worker registry.
-- **State & Properties:** `workers map[string]shared.WorkerNode` protected by `sync.RWMutex`.
-- **Interactions:** Gateway registration/heartbeat handlers mutate it; dispatcher reads active workers; master cleanup goroutine removes stale entries.
+- **State & Properties:** `workers map[string]shared.WorkerNode` protected by `sync.RWMutex`; worker state is `ready` or `draining`.
+- **Interactions:** Gateway registration/heartbeat/drain handlers mutate it; dispatcher reads schedulable workers; master cleanup goroutine removes stale entries.
 
 ### `internal/master/scheduler.go`
 
-- **Name & Responsibility:** Selects a worker for execution by capacity and distance.
+- **Name & Responsibility:** Selects a worker for execution by state, capacity, and distance.
 - **State & Properties:** `MinCPUFree`, `MinRAMFreeMB`; `EarthRadius` constant for Haversine distance.
 - **Interactions:** Dispatcher calls `Scheduler.SelectWorker`.
 
@@ -533,7 +533,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func (g *Gateway) Handler() http.Handler`
 
 - **Return Values:** HTTP handler with master routes wrapped by logging middleware.
-- **Routes:** `/wasmcat/health`, `/wasmcat/ready`, `/wasmcat/metrics`, `/internal/register`, `/internal/heartbeat`, `/api/v1/execute`.
+- **Routes:** `/wasmcat/health`, `/wasmcat/ready`, `/wasmcat/metrics`, `/internal/register`, `/internal/heartbeat`, `/internal/drain`, `/api/v1/execute`.
 - **Side Effects:** None until the returned handler is used.
 
 ##### `func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request)`
@@ -988,6 +988,7 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | Master | `/wasmcat/metrics` | none | `MetricsResponse` | JSON encode failure only. |
 | Master | `/internal/register` | `WorkerNode` | `APIResponse` | 400 invalid JSON, 403 certificate identity mismatch. |
 | Master | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
+| Master | `/internal/drain` | `DrainRequest` | `APIResponse` | 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
 | Master | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 400 invalid JSON/request, 503 dispatch failure. |
 | Worker | `/wasmcat/health` | none | `HealthResponse` | JSON encode failure only. |
 | Worker | `/wasmcat/ready` | none | `HealthResponse` | 503 if engine is nil. |

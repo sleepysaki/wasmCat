@@ -30,6 +30,9 @@ func (s *Scheduler) SelectWorker(userLat, userLon float64, workers []shared.Work
 func FilterWorkersByCapacity(workers []shared.WorkerNode, minCPUFree float64, minRAMFreeMB float64) []shared.WorkerNode {
 	eligible := make([]shared.WorkerNode, 0, len(workers))
 	for _, worker := range workers {
+		if worker.State == shared.WorkerStateDraining {
+			continue
+		}
 		if worker.CPUFree < minCPUFree {
 			continue
 		}

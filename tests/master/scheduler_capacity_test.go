@@ -82,3 +82,18 @@ func TestFilterWorkersByCapacityAllowsZeroThresholds(t *testing.T) {
 		t.Fatalf("expected all workers to be eligible, got %d", len(eligible))
 	}
 }
+
+func TestSchedulerSkipsDrainingWorkers(t *testing.T) {
+	scheduler := &master.Scheduler{}
+
+	worker, err := scheduler.SelectWorker(0, 0, []shared.WorkerNode{
+		{ID: "draining-near", Latitude: 0, Longitude: 0, CPUFree: 100, RAMFreeMB: 4096, State: shared.WorkerStateDraining},
+		{ID: "ready-far", Latitude: 10, Longitude: 10, CPUFree: 100, RAMFreeMB: 4096, State: shared.WorkerStateReady},
+	})
+	if err != nil {
+		t.Fatalf("SelectWorker returned error: %v", err)
+	}
+	if worker.ID != "ready-far" {
+		t.Fatalf("expected ready worker to be selected, got %+v", worker)
+	}
+}

@@ -28,6 +28,7 @@ The `master` object contains:
 | Field | Purpose |
 | --- | --- |
 | `active_workers` | Number of workers currently in the in-memory registry. |
+| `workers_by_state` | Worker counts keyed by state, such as `ready` and `draining`. |
 | `oldest_heartbeat_seconds` | Age of the oldest non-zero worker heartbeat. Omitted when no heartbeat is known. |
 | `dispatch_success` | Successful `/api/v1/execute` dispatches. |
 | `dispatch_failure` | Failed `/api/v1/execute` dispatches. |

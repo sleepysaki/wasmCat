@@ -34,10 +34,11 @@ type MetricsResponse struct {
 }
 
 type MasterMetrics struct {
-	ActiveWorkers    int    `json:"active_workers"`
-	OldestHeartbeatS *int64 `json:"oldest_heartbeat_seconds,omitempty"`
-	DispatchSuccess  uint64 `json:"dispatch_success"`
-	DispatchFailure  uint64 `json:"dispatch_failure"`
+	ActiveWorkers    int            `json:"active_workers"`
+	WorkersByState   map[string]int `json:"workers_by_state"`
+	OldestHeartbeatS *int64         `json:"oldest_heartbeat_seconds,omitempty"`
+	DispatchSuccess  uint64         `json:"dispatch_success"`
+	DispatchFailure  uint64         `json:"dispatch_failure"`
 }
 
 type WorkerMetrics struct {
@@ -132,13 +133,14 @@ func (m *Metrics) SnapshotBase(role string, nodeID string) MetricsResponse {
 	}
 }
 
-func (m *Metrics) MasterSnapshot(activeWorkers int, oldestHeartbeatSeconds *int64) MetricsResponse {
+func (m *Metrics) MasterSnapshot(activeWorkers int, workersByState map[string]int, oldestHeartbeatSeconds *int64) MetricsResponse {
 	response := m.SnapshotBase("master", "")
 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	response.Master = &MasterMetrics{
 		ActiveWorkers:    activeWorkers,
+		WorkersByState:   workersByState,
 		OldestHeartbeatS: oldestHeartbeatSeconds,
 		DispatchSuccess:  m.dispatchSuccess,
 		DispatchFailure:  m.dispatchFailure,
