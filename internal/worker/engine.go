@@ -83,11 +83,11 @@ func (e *WasmEngine) Limits() Limits {
 	return e.limits
 }
 
-func (e *WasmEngine) CacheStats() ModuleCacheStats {
+func (e *WasmEngine) CacheStats() shared.ModuleCacheStats {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	return ModuleCacheStats{
+	return shared.ModuleCacheStats{
 		Entries:    len(e.cache),
 		Bytes:      e.cacheBytes,
 		MaxEntries: e.limits.MaxCachedModules,

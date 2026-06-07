@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"wasmcat/internal/shared"
 )
 
 type statusRecorder struct {
@@ -19,6 +20,10 @@ func Configure(component string) *slog.Logger {
 }
 
 func Middleware(component string, next http.Handler) http.Handler {
+	return MiddlewareWithMetrics(component, next, nil)
+}
+
+func MiddlewareWithMetrics(component string, next http.Handler, metrics *shared.Metrics) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{
@@ -27,6 +32,7 @@ func Middleware(component string, next http.Handler) http.Handler {
 		}
 
 		next.ServeHTTP(rec, r)
+		metrics.ObserveRequest(r.URL.Path, rec.status)
 
 		slog.Info("http request",
 			"component", component,

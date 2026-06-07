@@ -21,14 +21,16 @@ type WorkerServer struct {
 	Engine  *WasmEngine
 	NodeID  string
 	CertDir string
+	Metrics *shared.Metrics
 }
 
 func (s *WorkerServer) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/wasmcat/health", s.handleHealth)
 	mux.HandleFunc("/wasmcat/ready", s.handleReady)
+	mux.HandleFunc("/wasmcat/metrics", s.handleMetrics)
 	mux.HandleFunc("/invoke", s.handleInvoke)
-	return logging.Middleware("worker", mux)
+	return logging.MiddlewareWithMetrics("worker", mux, s.metrics())
 }
 
 func (s *WorkerServer) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +54,15 @@ func (s *WorkerServer) handleReady(w http.ResponseWriter, r *http.Request) {
 		NodeID: s.NodeID,
 		Role:   "worker",
 	})
+}
+
+func (s *WorkerServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	var cacheStats shared.ModuleCacheStats
+	if s.Engine != nil {
+		cacheStats = s.Engine.CacheStats()
+	}
+
+	shared.WriteJSON(w, http.StatusOK, s.metrics().WorkerSnapshot(s.NodeID, cacheStats))
 }
 
 // Logic handler
@@ -79,15 +90,25 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	// r.Context() connects execution to the HTTP request, so cancellation can flow downward.
 	result, err := s.Engine.ExecuteWithDigest(r.Context(), req.ModuleName, req.ModuleURL, req.ModuleDigest, req.Payload, req.JITBearerToken)
 	if err != nil {
+		s.metrics().IncWorkerExecutionFailure()
 		shared.WriteError(w, http.StatusBadRequest, "execution_failed", err)
 		return
 	}
+	s.metrics().IncWorkerExecutionSuccess()
 
 	// Wrap the output in the shared response model so the master and user see the same shape.
 	resp := shared.ExecutionResponse{
 		Result: result,
 	}
 	shared.WriteJSON(w, http.StatusOK, resp)
+}
+
+func (s *WorkerServer) metrics() *shared.Metrics {
+	if s.Metrics == nil {
+		s.Metrics = shared.NewMetrics()
+	}
+
+	return s.Metrics
 }
 
 func (s *WorkerServer) Start(ctx context.Context, port string) error {

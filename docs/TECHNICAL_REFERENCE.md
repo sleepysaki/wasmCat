@@ -104,7 +104,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/shared/models.go`
 
 - **Name & Responsibility:** Defines JSON models shared by master and worker.
-- **State & Properties:** `WorkerNode`, `Heartbeat`, `ExecutionRequest`, `ExecutionResponse`, `APIResponse`, `ErrorResponse`, `HealthResponse`.
+- **State & Properties:** `WorkerNode`, `Heartbeat`, `ExecutionRequest`, `ExecutionResponse`, `APIResponse`, `ErrorResponse`, `HealthResponse`, and metrics response models.
 - **Interactions:** All HTTP request/response handlers use these models.
 
 ### `internal/shared/http.go`
@@ -112,6 +112,12 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Name & Responsibility:** Standardizes JSON and error responses.
 - **State & Properties:** No internal state.
 - **Interactions:** Master and worker handlers call `WriteJSON` and `WriteError`. Error responses use safe public messages while raw errors are logged.
+
+### `internal/shared/metrics.go`
+
+- **Name & Responsibility:** Tracks process-local request, dispatch, execution, and cache/worker metrics.
+- **State & Properties:** Mutex-protected counters, start time, request counts by status/path, dispatch counters, and worker execution counters.
+- **Interactions:** Logging middleware records request metrics; master and worker metrics endpoints expose snapshots.
 
 ### `internal/shared/client.go`
 
@@ -122,7 +128,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/master/gateway.go`
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
-- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`.
+- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, and `Gateway.Metrics`.
 - **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
 
 ### `internal/master/registry.go`
@@ -158,8 +164,8 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/worker/server.go`
 
 - **Name & Responsibility:** Worker HTTPS API server and invocation handler.
-- **State & Properties:** `WorkerServer.Engine`, `WorkerServer.NodeID`, `WorkerServer.CertDir`.
-- **Interactions:** Calls `WasmEngine.Execute`; serves health/readiness; uses mTLS server config.
+- **State & Properties:** `WorkerServer.Engine`, `WorkerServer.NodeID`, `WorkerServer.CertDir`, and `WorkerServer.Metrics`.
+- **Interactions:** Calls `WasmEngine.Execute`; serves health/readiness/metrics; uses mTLS server config.
 
 ### `internal/worker/engine.go`
 
@@ -191,7 +197,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **`.github/workflows/ci.yml`:** Pull request and main branch quality gates.
 - **`.github/workflows/release.yml`:** Tag-triggered native release publishing.
 - **`packaging/systemd/*`:** Service and env templates for Linux hosts.
-- **`tests/*`:** Go tests live outside production package directories and cover config, bootstrap, gateway, dispatcher, shared HTTP clients, worker server, limits, cache lifecycle, engine behavior, an in-memory master-to-worker execution path, and a real binary process smoke test.
+- **`tests/*`:** Go tests live outside production package directories and cover config, bootstrap, gateway, dispatcher, shared HTTP clients, metrics, worker server, limits, cache lifecycle, engine behavior, an in-memory master-to-worker execution path, and a real binary process smoke test.
 
 ## 3. Comprehensive API & Function Reference
 
@@ -527,7 +533,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func (g *Gateway) Handler() http.Handler`
 
 - **Return Values:** HTTP handler with master routes wrapped by logging middleware.
-- **Routes:** `/wasmcat/health`, `/wasmcat/ready`, `/internal/register`, `/internal/heartbeat`, `/api/v1/execute`.
+- **Routes:** `/wasmcat/health`, `/wasmcat/ready`, `/wasmcat/metrics`, `/internal/register`, `/internal/heartbeat`, `/api/v1/execute`.
 - **Side Effects:** None until the returned handler is used.
 
 ##### `func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request)`
@@ -743,7 +749,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 ##### `func (s *WorkerServer) Handler() http.Handler`
 
-- **Return Values:** HTTP handler with `/wasmcat/health`, `/wasmcat/ready`, and `/invoke`.
+- **Return Values:** HTTP handler with `/wasmcat/health`, `/wasmcat/ready`, `/wasmcat/metrics`, and `/invoke`.
 - **Side Effects:** None until served.
 
 ##### `func (s *WorkerServer) handleHealth(w http.ResponseWriter, r *http.Request)`
@@ -979,11 +985,13 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | --- | --- | --- | --- | --- |
 | Master | `/wasmcat/health` | none | `HealthResponse` | JSON encode failure only. |
 | Master | `/wasmcat/ready` | none | `HealthResponse` | 503 if registry, dispatcher, or scheduler is nil. |
+| Master | `/wasmcat/metrics` | none | `MetricsResponse` | JSON encode failure only. |
 | Master | `/internal/register` | `WorkerNode` | `APIResponse` | 400 invalid JSON, 403 certificate identity mismatch. |
 | Master | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
 | Master | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 400 invalid JSON/request, 503 dispatch failure. |
 | Worker | `/wasmcat/health` | none | `HealthResponse` | JSON encode failure only. |
 | Worker | `/wasmcat/ready` | none | `HealthResponse` | 503 if engine is nil. |
+| Worker | `/wasmcat/metrics` | none | `MetricsResponse` | JSON encode failure only. |
 | Worker | `/invoke` | `ExecutionRequest` | `ExecutionResponse` | 400 invalid JSON/request/execution failure. |
 
 The handlers do not currently enforce HTTP methods. Operational clients should still use the intended methods: `GET` for health/readiness and `POST` for registration, heartbeat, execute, and invoke.

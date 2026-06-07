@@ -23,7 +23,7 @@ Unit tests validate components in isolation:
 - `tests/config`: environment parsing and validation.
 - `tests/master`: ACR parsing, gateway errors, dispatcher errors, scheduler capacity filtering.
 - `tests/shared`: shared HTTP client timeout defaults and safe public error contracts.
-- `tests/worker`: WASM engine execution, cache lifecycle, worker limits, worker health/readiness, JSON error handling.
+- `tests/worker`: WASM engine execution, cache lifecycle, metrics, worker limits, worker health/readiness, JSON error handling.
 
 Run all unit-level tests:
 

@@ -65,6 +65,39 @@ func (r *Registry) GetActiveWorkers() []shared.WorkerNode {
 	return activeWorkers
 }
 
+func (r *Registry) ActiveWorkerCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return len(r.workers)
+}
+
+func (r *Registry) OldestHeartbeatAge(now time.Time) *int64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var oldest *time.Time
+	for _, worker := range r.workers {
+		lastSeen := worker.LastSeen
+		if lastSeen.IsZero() {
+			continue
+		}
+		if oldest == nil || lastSeen.Before(*oldest) {
+			oldest = &lastSeen
+		}
+	}
+	if oldest == nil {
+		return nil
+	}
+
+	age := int64(now.Sub(*oldest).Seconds())
+	if age < 0 {
+		age = 0
+	}
+
+	return &age
+}
+
 // Clean up workers that haven't sent a heartbeat in the last 30 seconds
 func (r *Registry) Cleanup() {
 	r.mu.Lock()

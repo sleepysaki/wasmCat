@@ -22,6 +22,7 @@ type Gateway struct {
 	Registry   *Registry
 	Dispatcher *Dispatcher
 	CertDir    string
+	Metrics    *shared.Metrics
 }
 
 // Constructor
@@ -35,10 +36,11 @@ func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/wasmcat/health", g.handleHealth)
 	mux.HandleFunc("/wasmcat/ready", g.handleReady)
+	mux.HandleFunc("/wasmcat/metrics", g.handleMetrics)
 	mux.HandleFunc("/internal/register", g.handleRegister)
 	mux.HandleFunc("/internal/heartbeat", g.handleHeartbeat)
 	mux.HandleFunc("/api/v1/execute", g.handleExecute)
-	return logging.Middleware("master", mux)
+	return logging.MiddlewareWithMetrics("master", mux, g.metrics())
 }
 
 func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +62,17 @@ func (g *Gateway) handleReady(w http.ResponseWriter, r *http.Request) {
 		Status: "ready",
 		Role:   "master",
 	})
+}
+
+func (g *Gateway) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	activeWorkers := 0
+	var oldestHeartbeatSeconds *int64
+	if g.Registry != nil {
+		activeWorkers = g.Registry.ActiveWorkerCount()
+		oldestHeartbeatSeconds = g.Registry.OldestHeartbeatAge(time.Now())
+	}
+
+	shared.WriteJSON(w, http.StatusOK, g.metrics().MasterSnapshot(activeWorkers, oldestHeartbeatSeconds))
 }
 
 func (g *Gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -176,11 +189,21 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// Tell the Dispatcher to find a worker and run the code
 	result, err := g.Dispatcher.Dispatch(r.Context(), req)
 	if err != nil {
+		g.metrics().IncDispatchFailure()
 		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", err)
 		return
 	}
+	g.metrics().IncDispatchSuccess()
 
 	shared.WriteJSON(w, http.StatusOK, result)
+}
+
+func (g *Gateway) metrics() *shared.Metrics {
+	if g.Metrics == nil {
+		g.Metrics = shared.NewMetrics()
+	}
+
+	return g.Metrics
 }
 
 func validateWorkerPeerIdentity(r *http.Request, workerID string) error {
