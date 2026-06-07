@@ -41,6 +41,8 @@ func PublicErrorMessage(code string) string {
 		return "HTTP method is not allowed for this endpoint."
 	case "execute_client_unauthorized":
 		return "Execution client is not authorized."
+	case "request_body_too_large":
+		return "Request body is too large."
 	case "invalid_worker_data":
 		return "Invalid worker registration request."
 	case "invalid_heartbeat":

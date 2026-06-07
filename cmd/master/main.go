@@ -62,10 +62,11 @@ func main() {
 
 	// Create the API Gateway, need the Registry (to handle /register and /heartbeat) and the Dispatcher (to handle /api/v1/execute)
 	gateway := &master.Gateway{
-		Registry:         reg,
-		Dispatcher:       dispatch,
-		CertDir:          cfg.CertDir,
-		ExecuteClientIDs: cfg.ExecuteClientIDs,
+		Registry:            reg,
+		Dispatcher:          dispatch,
+		CertDir:             cfg.CertDir,
+		ExecuteClientIDs:    cfg.ExecuteClientIDs,
+		MaxExecuteBodyBytes: cfg.MaxExecuteBodyBytes,
 	}
 
 	// Background Processes
@@ -122,6 +123,7 @@ func runInit(args []string) error {
 	minWorkerCPUFree := flags.Float64("min-worker-cpu-free", 0, "minimum free CPU percent required for scheduling")
 	minWorkerRAMFreeMB := flags.Float64("min-worker-ram-free-mb", 0, "minimum free RAM in MiB required for scheduling")
 	executeClientAllowlist := flags.String("execute-client-allowlist", "", "comma-separated client certificate CN or DNS SAN values allowed to call /api/v1/execute")
+	maxExecuteBodyBytes := flags.Int64("max-execution-request-bytes", 2<<20, "maximum JSON body size accepted by /api/v1/execute")
 	devWorkerID := flags.String("dev-worker-id", "worker-vn-01", "worker ID used when generating development certificates")
 	devCerts := flags.Bool("dev-certs", false, "generate local development certificates")
 	force := flags.Bool("force", false, "overwrite existing generated files")
@@ -131,16 +133,17 @@ func runInit(args []string) error {
 	}
 
 	result, err := bootstrap.InitMaster(bootstrap.MasterOptions{
-		ConfigDir:          *configDir,
-		CertDir:            *certDir,
-		Port:               *port,
-		CleanupInterval:    *cleanupInterval,
-		MinWorkerCPUFree:   *minWorkerCPUFree,
-		MinWorkerRAMFreeMB: *minWorkerRAMFreeMB,
-		ExecuteClientIDs:   *executeClientAllowlist,
-		DevWorkerID:        *devWorkerID,
-		GenerateDevCerts:   *devCerts,
-		Force:              *force,
+		ConfigDir:           *configDir,
+		CertDir:             *certDir,
+		Port:                *port,
+		CleanupInterval:     *cleanupInterval,
+		MinWorkerCPUFree:    *minWorkerCPUFree,
+		MinWorkerRAMFreeMB:  *minWorkerRAMFreeMB,
+		ExecuteClientIDs:    *executeClientAllowlist,
+		MaxExecuteBodyBytes: *maxExecuteBodyBytes,
+		DevWorkerID:         *devWorkerID,
+		GenerateDevCerts:    *devCerts,
+		Force:               *force,
 	})
 	if err != nil {
 		return err

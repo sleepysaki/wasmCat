@@ -629,6 +629,22 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Error Handling:** Returns missing certificate or unauthorized certificate identity errors.
 - **Side Effects:** None.
 
+##### `func (g *Gateway) maxExecuteBodyBytes() int64`
+
+- **Return Values:** Configured `MaxExecuteBodyBytes`, or the 2 MiB default when unset.
+- **Side Effects:** None.
+
+##### `func limitRequestBody(w http.ResponseWriter, r *http.Request, maxBytes int64)`
+
+- **Parameters:** Response writer, request, and byte limit.
+- **Side Effects:** Replaces `r.Body` with `http.MaxBytesReader`.
+
+##### `func isBodyTooLargeError(err error) bool`
+
+- **Parameters:** Decode/read error.
+- **Return Values:** True when the error wraps `*http.MaxBytesError`.
+- **Side Effects:** None.
+
 ##### `func NewRegistry() *Registry`
 
 - **Return Values:** Registry with initialized worker map.
@@ -1005,6 +1021,7 @@ The core responsibility is to execute WASM modules on registered workers without
 | `MIN_WORKER_CPU_FREE` | `0` | float percentage | Minimum reported free CPU required before the scheduler can select a worker. |
 | `MIN_WORKER_RAM_FREE_MB` | `0` | float MiB | Minimum reported free RAM required before the scheduler can select a worker. |
 | `EXECUTE_CLIENT_ALLOWLIST` | empty | comma-separated certificate identities | Optional client certificate CN or DNS SAN allowlist for `/api/v1/execute`. Empty allows any trusted mTLS client. |
+| `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | integer bytes | Maximum JSON body size accepted by master `/api/v1/execute`. |
 
 ### Worker Environment Variables
 
@@ -1065,10 +1082,10 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | Master | `GET` | `/wasmcat/health` | none | `HealthResponse` | 405 wrong method, JSON encode failure only. |
 | Master | `GET` | `/wasmcat/ready` | none | `HealthResponse` | 405 wrong method, 503 if registry, dispatcher, or scheduler is nil. |
 | Master | `GET` | `/wasmcat/metrics` | none | `MetricsResponse` | 405 wrong method, JSON encode failure only. |
-| Master | `POST` | `/internal/register` | `WorkerNode` | `APIResponse` | 405 wrong method, 400 invalid JSON, 403 certificate identity mismatch. |
-| Master | `POST` | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 405 wrong method, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
-| Master | `POST` | `/internal/drain` | `DrainRequest` | `APIResponse` | 405 wrong method, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
-| Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 403 unauthorized execution client, 400 invalid JSON/request, 503 dispatch failure. |
+| Master | `POST` | `/internal/register` | `WorkerNode` | `APIResponse` | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch. |
+| Master | `POST` | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
+| Master | `POST` | `/internal/drain` | `DrainRequest` | `APIResponse` | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
+| Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 413 body too large, 403 unauthorized execution client, 400 invalid JSON/request, 503 dispatch failure. |
 | Worker | `GET` | `/wasmcat/health` | none | `HealthResponse` | 405 wrong method, JSON encode failure only. |
 | Worker | `GET` | `/wasmcat/ready` | none | `HealthResponse` | 405 wrong method, 503 if engine is nil. |
 | Worker | `GET` | `/wasmcat/metrics` | none | `MetricsResponse` | 405 wrong method, JSON encode failure only. |
@@ -1132,6 +1149,7 @@ output_len = uint32(result)
 - **ACR token cache is process-local:** Repeated dispatches for the same registry repository reuse a token until 30 seconds before expiry. Multiple master instances do not share token cache state.
 - **HTTP clients are bounded:** Shared client defaults set total request, dial, TLS handshake, response-header, idle connection, and pool limits. Request contexts still provide operation-specific cancellation.
 - **HTTP retries are bounded:** Safe outbound paths retry transient statuses and transport errors up to 3 attempts. Worker `/invoke` dispatch is not retried because it can execute user code.
+- **Master request bodies are bounded:** Internal worker control messages are capped at 4 KiB. `/api/v1/execute` uses `MAX_EXECUTION_REQUEST_BYTES`.
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
 - **Cold fetch coalescing is process-local:** Concurrent cold requests for the same cache key share one download/compile inside a worker process. Separate workers still compile independently.

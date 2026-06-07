@@ -12,16 +12,17 @@ import (
 )
 
 type MasterOptions struct {
-	ConfigDir          string
-	CertDir            string
-	Port               string
-	CleanupInterval    string
-	MinWorkerCPUFree   float64
-	MinWorkerRAMFreeMB float64
-	ExecuteClientIDs   string
-	DevWorkerID        string
-	GenerateDevCerts   bool
-	Force              bool
+	ConfigDir           string
+	CertDir             string
+	Port                string
+	CleanupInterval     string
+	MinWorkerCPUFree    float64
+	MinWorkerRAMFreeMB  float64
+	ExecuteClientIDs    string
+	MaxExecuteBodyBytes int64
+	DevWorkerID         string
+	GenerateDevCerts    bool
+	Force               bool
 }
 
 type WorkerOptions struct {
@@ -84,6 +85,7 @@ func InitMaster(options MasterOptions) (Result, error) {
 		{"MIN_WORKER_CPU_FREE", strconv.FormatFloat(options.MinWorkerCPUFree, 'f', -1, 64)},
 		{"MIN_WORKER_RAM_FREE_MB", strconv.FormatFloat(options.MinWorkerRAMFreeMB, 'f', -1, 64)},
 		{"EXECUTE_CLIENT_ALLOWLIST", options.ExecuteClientIDs},
+		{"MAX_EXECUTION_REQUEST_BYTES", strconv.FormatInt(options.MaxExecuteBodyBytes, 10)},
 	}
 
 	if err := writeEnvFile(configPath, values, options.Force); err != nil {
@@ -157,6 +159,9 @@ func normalizeMaster(options MasterOptions) MasterOptions {
 	}
 	if options.CertDir == "" && options.ConfigDir != "" {
 		options.CertDir = filepath.Join(options.ConfigDir, "certs")
+	}
+	if options.MaxExecuteBodyBytes <= 0 {
+		options.MaxExecuteBodyBytes = 2 << 20
 	}
 
 	return options

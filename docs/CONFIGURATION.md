@@ -17,6 +17,7 @@ Execution client authorization is documented in [EXECUTION_AUTHORIZATION.md](EXE
 | `MIN_WORKER_CPU_FREE` | `0` | Minimum free CPU percentage required for a worker to receive new work. |
 | `MIN_WORKER_RAM_FREE_MB` | `0` | Minimum free RAM in MiB required for a worker to receive new work. |
 | `EXECUTE_CLIENT_ALLOWLIST` | empty | Comma-separated client certificate CN or DNS SAN values allowed to call `/api/v1/execute`. Empty means any trusted mTLS client can execute work. |
+| `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | Maximum JSON body size accepted by the master `/api/v1/execute` endpoint. |
 
 ## Worker
 

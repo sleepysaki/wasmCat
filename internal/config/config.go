@@ -21,14 +21,15 @@ type Limits struct {
 }
 
 type MasterConfig struct {
-	Port               string
-	CertDir            string
-	AutoGenerateCerts  bool
-	WorkerIDForCert    string
-	CleanupInterval    time.Duration
-	MinWorkerCPUFree   float64
-	MinWorkerRAMFreeMB float64
-	ExecuteClientIDs   []string
+	Port                string
+	CertDir             string
+	AutoGenerateCerts   bool
+	WorkerIDForCert     string
+	CleanupInterval     time.Duration
+	MinWorkerCPUFree    float64
+	MinWorkerRAMFreeMB  float64
+	ExecuteClientIDs    []string
+	MaxExecuteBodyBytes int64
 }
 
 type WorkerConfig struct {
@@ -60,16 +61,21 @@ func LoadMaster() (MasterConfig, error) {
 	if err != nil {
 		return MasterConfig{}, err
 	}
+	maxExecuteBodyBytes, err := int64Env("MAX_EXECUTION_REQUEST_BYTES", 2<<20)
+	if err != nil {
+		return MasterConfig{}, err
+	}
 
 	cfg := MasterConfig{
-		Port:               stringEnv("MASTER_PORT", "7270"),
-		CertDir:            stringEnv("CERT_DIR", "./certs"),
-		AutoGenerateCerts:  autoGenerateCerts,
-		WorkerIDForCert:    stringEnv("DEV_WORKER_ID", "worker-vn-01"),
-		CleanupInterval:    cleanupInterval,
-		MinWorkerCPUFree:   minWorkerCPUFree,
-		MinWorkerRAMFreeMB: minWorkerRAMFreeMB,
-		ExecuteClientIDs:   listEnv("EXECUTE_CLIENT_ALLOWLIST"),
+		Port:                stringEnv("MASTER_PORT", "7270"),
+		CertDir:             stringEnv("CERT_DIR", "./certs"),
+		AutoGenerateCerts:   autoGenerateCerts,
+		WorkerIDForCert:     stringEnv("DEV_WORKER_ID", "worker-vn-01"),
+		CleanupInterval:     cleanupInterval,
+		MinWorkerCPUFree:    minWorkerCPUFree,
+		MinWorkerRAMFreeMB:  minWorkerRAMFreeMB,
+		ExecuteClientIDs:    listEnv("EXECUTE_CLIENT_ALLOWLIST"),
+		MaxExecuteBodyBytes: maxExecuteBodyBytes,
 	}
 
 	return cfg, nil

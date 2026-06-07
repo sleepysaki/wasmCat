@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,11 @@ import (
 	"wasmcat/internal/logging"
 	"wasmcat/internal/security"
 	"wasmcat/internal/shared"
+)
+
+const (
+	defaultMaxExecuteBodyBytes  = 2 << 20
+	internalControlMaxBodyBytes = 4 << 10
 )
 
 // Web server for the Master node
@@ -28,6 +34,8 @@ type Gateway struct {
 	// /api/v1/execute. When set, the caller certificate must match one of these
 	// identities by common name or DNS SAN.
 	ExecuteClientIDs []string
+
+	MaxExecuteBodyBytes int64
 }
 
 // Constructor
@@ -99,11 +107,16 @@ func (g *Gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if !shared.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
+	limitRequestBody(w, r, internalControlMaxBodyBytes)
 
 	// Create empty box for the incoming worker data, decode the JSON from the request body into that box, and check for errors
 	var node shared.WorkerNode
 	err := json.NewDecoder(r.Body).Decode(&node)
 	if err != nil {
+		if isBodyTooLargeError(err) {
+			shared.WriteError(w, http.StatusRequestEntityTooLarge, "request_body_too_large", err)
+			return
+		}
 		shared.WriteError(w, http.StatusBadRequest, "invalid_worker_data", err)
 		return
 	}
@@ -127,11 +140,16 @@ func (g *Gateway) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if !shared.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
+	limitRequestBody(w, r, internalControlMaxBodyBytes)
 
 	var beat shared.Heartbeat
 
 	err := json.NewDecoder(r.Body).Decode(&beat)
 	if err != nil {
+		if isBodyTooLargeError(err) {
+			shared.WriteError(w, http.StatusRequestEntityTooLarge, "request_body_too_large", err)
+			return
+		}
 		shared.WriteError(w, http.StatusBadRequest, "invalid_heartbeat", err)
 		return
 	}
@@ -153,9 +171,14 @@ func (g *Gateway) handleDrain(w http.ResponseWriter, r *http.Request) {
 	if !shared.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
+	limitRequestBody(w, r, internalControlMaxBodyBytes)
 
 	var req shared.DrainRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isBodyTooLargeError(err) {
+			shared.WriteError(w, http.StatusRequestEntityTooLarge, "request_body_too_large", err)
+			return
+		}
 		shared.WriteError(w, http.StatusBadRequest, "invalid_drain_request", err)
 		return
 	}
@@ -237,9 +260,14 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusForbidden, "execute_client_unauthorized", err)
 		return
 	}
+	limitRequestBody(w, r, g.maxExecuteBodyBytes())
 
 	var req shared.ExecutionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isBodyTooLargeError(err) {
+			shared.WriteError(w, http.StatusRequestEntityTooLarge, "request_body_too_large", err)
+			return
+		}
 		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
 		return
 	}
@@ -272,6 +300,23 @@ func (g *Gateway) metrics() *shared.Metrics {
 	}
 
 	return g.Metrics
+}
+
+func (g *Gateway) maxExecuteBodyBytes() int64 {
+	if g.MaxExecuteBodyBytes > 0 {
+		return g.MaxExecuteBodyBytes
+	}
+
+	return defaultMaxExecuteBodyBytes
+}
+
+func limitRequestBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+}
+
+func isBodyTooLargeError(err error) bool {
+	var maxBytesErr *http.MaxBytesError
+	return errors.As(err, &maxBytesErr)
 }
 
 func validateWorkerPeerIdentity(r *http.Request, workerID string) error {

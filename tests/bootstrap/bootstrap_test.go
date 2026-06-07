@@ -14,14 +14,15 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 	certDir := filepath.Join(configDir, "certs")
 
 	result, err := bootstrap.InitMaster(bootstrap.MasterOptions{
-		ConfigDir:          configDir,
-		CertDir:            certDir,
-		Port:               "9443",
-		CleanupInterval:    "30s",
-		MinWorkerCPUFree:   10,
-		MinWorkerRAMFreeMB: 256,
-		ExecuteClientIDs:   "wasmcat-client,deployer.internal",
-		DevWorkerID:        "worker-test-01",
+		ConfigDir:           configDir,
+		CertDir:             certDir,
+		Port:                "9443",
+		CleanupInterval:     "30s",
+		MinWorkerCPUFree:    10,
+		MinWorkerRAMFreeMB:  256,
+		ExecuteClientIDs:    "wasmcat-client,deployer.internal",
+		MaxExecuteBodyBytes: 4096,
+		DevWorkerID:         "worker-test-01",
 	})
 	if err != nil {
 		t.Fatalf("InitMaster returned error: %v", err)
@@ -43,6 +44,7 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 	assertContains(t, env, "MIN_WORKER_CPU_FREE=10\n")
 	assertContains(t, env, "MIN_WORKER_RAM_FREE_MB=256\n")
 	assertContains(t, env, "EXECUTE_CLIENT_ALLOWLIST=wasmcat-client,deployer.internal\n")
+	assertContains(t, env, "MAX_EXECUTION_REQUEST_BYTES=4096\n")
 }
 
 func TestInitMasterRefusesToOverwriteEnvWithoutForce(t *testing.T) {

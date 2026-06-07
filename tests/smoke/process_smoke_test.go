@@ -61,6 +61,7 @@ func TestMasterWorkerBinariesExecuteWASMOverMTLS(t *testing.T) {
 	defer master.stop(t)
 
 	waitForFile(t, security.WorkerCertPath(certDir, workerID), 5*time.Second)
+	waitForFile(t, security.WorkerKeyPath(certDir, workerID), 5*time.Second)
 	client := newSmokeMTLSClient(t, certDir, workerID)
 	waitForReady(t, client, fmt.Sprintf("https://localhost:%s/wasmcat/ready", masterPort), master, 10*time.Second)
 

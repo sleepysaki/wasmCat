@@ -99,6 +99,7 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	t.Setenv("MIN_WORKER_CPU_FREE", "15.5")
 	t.Setenv("MIN_WORKER_RAM_FREE_MB", "512")
 	t.Setenv("EXECUTE_CLIENT_ALLOWLIST", "wasmcat-client, deployer.internal ")
+	t.Setenv("MAX_EXECUTION_REQUEST_BYTES", "4096")
 
 	cfg, err := config.LoadMaster()
 	if err != nil {
@@ -122,6 +123,9 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	}
 	if len(cfg.ExecuteClientIDs) != 2 || cfg.ExecuteClientIDs[0] != "wasmcat-client" || cfg.ExecuteClientIDs[1] != "deployer.internal" {
 		t.Fatalf("unexpected execute client allowlist: %+v", cfg.ExecuteClientIDs)
+	}
+	if cfg.MaxExecuteBodyBytes != 4096 {
+		t.Fatalf("expected max execute body bytes 4096, got %d", cfg.MaxExecuteBodyBytes)
 	}
 }
 
