@@ -309,8 +309,8 @@ func (e *WasmEngine) downloadAndCompile(ctx context.Context, moduleName, moduleU
 	}
 
 	// Download the raw .wasm bytes.
-	// This is still a simple client; production should add size limits and client timeouts.
-	resp, err := e.client.Do(req)
+	// GET is safe to retry because it does not execute the module or mutate remote state.
+	resp, err := shared.DoWithRetry(e.client, req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("download %s: %w", moduleURL, err)
 	}

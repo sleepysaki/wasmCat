@@ -10,6 +10,8 @@ wasmCat uses bounded outbound HTTP clients for worker fetches, ACR calls, teleme
 - Master dispatcher calls to worker `/invoke` over mTLS.
 - Worker registration and heartbeat calls to the master over mTLS.
 
+Retry behavior is documented separately in `docs/HTTP_RETRIES.md`. Timeouts cap each outbound request path; retries decide whether a transient failure should be attempted again before the caller receives the final error or response.
+
 ## Defaults
 
 | Setting | Default | Purpose |

@@ -72,7 +72,7 @@ func sendDrain(client *http.Client, masterURL string, nodeID string) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := shared.DoWithRetry(client, req)
 	if err != nil {
 		slog.Error("failed to send drain request", "worker_id", nodeID, "master_url", masterURL, "error", err)
 		return
@@ -112,7 +112,7 @@ func registerWorker(client *http.Client, masterURL string, nodeID string, worker
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := shared.DoWithRetry(client, req)
 	if err != nil {
 		slog.Error("failed to register worker with master", "worker_id", nodeID, "master_url", masterURL, "error", err)
 		return
@@ -156,7 +156,7 @@ func sendHeartbeat(ctx context.Context, client *http.Client, masterURL string, n
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := shared.DoWithRetry(client, req)
 
 	if err != nil {
 		slog.Error("failed to reach master heartbeat endpoint", "worker_id", nodeID, "master_url", masterURL, "error", err)

@@ -121,9 +121,9 @@ The core responsibility is to execute WASM modules on registered workers without
 
 ### `internal/shared/client.go`
 
-- **Name & Responsibility:** Creates outbound HTTP clients and transports with bounded timeouts.
-- **State & Properties:** Timeout and connection-pool constants for dial, TLS handshake, response headers, full request duration, idle connections, and idle pool size.
-- **Interactions:** Worker module fetches, ACR manifest/token calls, dispatcher mTLS clients, and telemetry mTLS clients use this transport policy.
+- **Name & Responsibility:** Creates outbound HTTP clients/transports with bounded timeouts and provides retry helpers for repeatable HTTP calls.
+- **State & Properties:** Timeout and connection-pool constants for dial, TLS handshake, response headers, full request duration, idle connections, and idle pool size. Retry constants define 3 attempts and 100ms linear backoff.
+- **Interactions:** Worker module fetches, ACR manifest/token calls, dispatcher mTLS clients, and telemetry mTLS clients use this transport policy. ACR calls, module fetches, and telemetry use `DoWithRetry`; dispatcher `/invoke` remains single-shot to avoid duplicate module execution.
 
 ### `internal/master/gateway.go`
 
@@ -469,6 +469,25 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Return Values:** Transport with proxy support, dial timeout, keep-alive, TLS handshake timeout, response-header timeout, idle timeout, and idle connection limits.
 - **Side Effects:** None.
 
+##### `func DefaultHTTPRetryPolicy() RetryPolicy`
+
+- **Return Values:** Retry policy with 3 attempts and 100ms base backoff.
+- **Side Effects:** None.
+
+##### `func DoWithRetry(client *http.Client, req *http.Request) (*http.Response, error)`
+
+- **Parameters:** HTTP client and request.
+- **Return Values:** First successful or non-retryable response, final retryable response after attempts are exhausted, or transport error.
+- **Error Handling:** Retries transport errors unless the request context is done; retries `408`, `429`, `500`, `502`, `503`, and `504`.
+- **Side Effects:** Sends outbound HTTP requests. Retries may send the same request multiple times if the body can be replayed.
+
+##### `func DoWithRetryPolicy(client *http.Client, req *http.Request, policy RetryPolicy) (*http.Response, error)`
+
+- **Parameters:** HTTP client, request, and explicit retry policy.
+- **Return Values:** Same as `DoWithRetry`.
+- **Error Handling:** Uses one attempt when policy attempts are zero or negative; returns an error when a retry needs a request body that cannot be recreated.
+- **Side Effects:** Sends outbound HTTP requests and drains retryable response bodies before the next attempt.
+
 ### Logging package
 
 ##### `func Configure(component string) *slog.Logger`
@@ -756,13 +775,13 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Return Values:** ACR refresh token.
 - **Error Handling:** Request creation, network errors, non-200 status with body, JSON decode errors, missing `refresh_token`.
-- **Side Effects:** HTTP POST to `https://<service>/oauth2/exchange`.
+- **Side Effects:** Retryable HTTP POST to `https://<service>/oauth2/exchange`.
 
 ##### `func exchangeRefreshTokenForAccessToken(ctx context.Context, service string, repositoryName string, refreshToken string) (string, time.Duration, error)`
 
 - **Return Values:** ACR access token scoped to `repository:<repositoryName>:pull` and token TTL. If ACR omits `expires_in`, the TTL defaults to 5 minutes.
 - **Error Handling:** Request creation, network errors, non-200 status with body, JSON decode errors, missing `access_token`.
-- **Side Effects:** HTTP POST to `https://<service>/oauth2/token`.
+- **Side Effects:** Retryable HTTP POST to `https://<service>/oauth2/token`.
 
 ##### `func extractTenantID(jwtToken string) (string, error)`
 
@@ -1077,6 +1096,7 @@ output_len = uint32(result)
 - **Registry cleanup age is fixed:** `Registry.Cleanup` removes nodes older than 30 seconds. `CLEANUP_INTERVAL` controls how often cleanup runs, not the expiration age.
 - **ACR token cache is process-local:** Repeated dispatches for the same registry repository reuse a token until 30 seconds before expiry. Multiple master instances do not share token cache state.
 - **HTTP clients are bounded:** Shared client defaults set total request, dial, TLS handshake, response-header, idle connection, and pool limits. Request contexts still provide operation-specific cancellation.
+- **HTTP retries are bounded:** Safe outbound paths retry transient statuses and transport errors up to 3 attempts. Worker `/invoke` dispatch is not retried because it can execute user code.
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
 - **Cold fetch coalescing is process-local:** Concurrent cold requests for the same cache key share one download/compile inside a worker process. Separate workers still compile independently.

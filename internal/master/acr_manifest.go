@@ -179,7 +179,7 @@ func fetchACRManifest(ctx context.Context, manifestURL string, token string) (oc
 		"application/vnd.docker.distribution.manifest.list.v2+json",
 	}, ", "))
 
-	resp, err := acrHTTPClient.Do(req)
+	resp, err := shared.DoWithRetry(acrHTTPClient, req)
 	if err != nil {
 		return ociManifest{}, fmt.Errorf("fetch acr manifest: %w", err)
 	}

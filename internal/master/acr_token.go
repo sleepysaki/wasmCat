@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"wasmcat/internal/shared"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -183,7 +184,7 @@ func exchangeAADTokenForRefreshToken(ctx context.Context, service string, tenant
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := acrHTTPClient.Do(req)
+	resp, err := shared.DoWithRetry(acrHTTPClient, req)
 	if err != nil {
 		return "", fmt.Errorf("exchange aad token for refresh token: %w", err)
 	}
@@ -218,7 +219,7 @@ func exchangeRefreshTokenForAccessToken(ctx context.Context, service string, rep
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := acrHTTPClient.Do(req)
+	resp, err := shared.DoWithRetry(acrHTTPClient, req)
 	if err != nil {
 		return "", 0, fmt.Errorf("exchange refresh token for access token: %w", err)
 	}
