@@ -29,6 +29,8 @@ Module cache behavior is documented in [MODULE_CACHE_LIFECYCLE.md](MODULE_CACHE_
 | `CERT_DIR` | `./certs` | Directory containing `ca.crt`, `worker-<id>.crt`, and `worker-<id>.key`. |
 | `HEARTBEAT_INTERVAL` | `5s` | Worker registration and heartbeat interval. |
 
+Worker registration and heartbeat require the mTLS client certificate identity to match `WORKER_ID`. The master accepts a certificate common name of `wasmcat-worker-<WORKER_ID>` or a DNS SAN containing either `<WORKER_ID>` or `wasmcat-worker-<WORKER_ID>`.
+
 ## Worker Limits
 
 | Variable | Default | Purpose |

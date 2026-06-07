@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 	"wasmcat/internal/logging"
 	"wasmcat/internal/security"
@@ -69,6 +70,10 @@ func (g *Gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusBadRequest, "invalid_worker_data", err)
 		return
 	}
+	if err := validateWorkerPeerIdentity(r, node.ID); err != nil {
+		shared.WriteError(w, http.StatusForbidden, "worker_identity_mismatch", err)
+		return
+	}
 	// Register the worker in the registry
 	g.Registry.RegisterWorker(node)
 
@@ -87,6 +92,10 @@ func (g *Gateway) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&beat)
 	if err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid_heartbeat", err)
+		return
+	}
+	if err := validateWorkerPeerIdentity(r, beat.NodeID); err != nil {
+		shared.WriteError(w, http.StatusForbidden, "worker_identity_mismatch", err)
 		return
 	}
 
@@ -172,4 +181,37 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shared.WriteJSON(w, http.StatusOK, result)
+}
+
+func validateWorkerPeerIdentity(r *http.Request, workerID string) error {
+	workerID = strings.TrimSpace(workerID)
+	if workerID == "" {
+		return fmt.Errorf("worker id is required")
+	}
+
+	// Handler-only tests use httptest without TLS. The real Gateway.Start path always
+	// requires a verified client certificate before the request reaches this handler.
+	if r.TLS == nil {
+		return nil
+	}
+	if len(r.TLS.PeerCertificates) == 0 {
+		return fmt.Errorf("worker client certificate is required")
+	}
+
+	cert := r.TLS.PeerCertificates[0]
+	expectedName := workerCertificateName(workerID)
+	if cert.Subject.CommonName == expectedName {
+		return nil
+	}
+	for _, dnsName := range cert.DNSNames {
+		if dnsName == workerID || dnsName == expectedName {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("worker certificate identity %q is not allowed to claim worker id %q", cert.Subject.CommonName, workerID)
+}
+
+func workerCertificateName(workerID string) string {
+	return "wasmcat-worker-" + workerID
 }

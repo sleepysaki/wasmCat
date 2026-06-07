@@ -234,6 +234,8 @@ worker-worker-us-01.key
 
 The worker certificate name must match the current worker certificate path logic: `worker-<WORKER_ID>.crt` and `worker-<WORKER_ID>.key`.
 
+The worker certificate identity must also match the claimed worker ID. For `WORKER_ID=worker-us-01`, use either common name `wasmcat-worker-worker-us-01` or a DNS SAN containing `worker-us-01` or `wasmcat-worker-worker-us-01`.
+
 Make the certificates readable by the service user:
 
 ```bash

@@ -123,7 +123,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
 - **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`.
-- **Interactions:** Updates `Registry`, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
+- **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
 
 ### `internal/master/registry.go`
 
@@ -972,8 +972,8 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | --- | --- | --- | --- | --- |
 | Master | `/wasmcat/health` | none | `HealthResponse` | JSON encode failure only. |
 | Master | `/wasmcat/ready` | none | `HealthResponse` | 503 if registry, dispatcher, or scheduler is nil. |
-| Master | `/internal/register` | `WorkerNode` | `APIResponse` | 400 invalid JSON. |
-| Master | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 400 invalid JSON, 404 unknown worker. |
+| Master | `/internal/register` | `WorkerNode` | `APIResponse` | 400 invalid JSON, 403 certificate identity mismatch. |
+| Master | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
 | Master | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 400 invalid JSON/request, 503 dispatch failure. |
 | Worker | `/wasmcat/health` | none | `HealthResponse` | JSON encode failure only. |
 | Worker | `/wasmcat/ready` | none | `HealthResponse` | 503 if engine is nil. |
