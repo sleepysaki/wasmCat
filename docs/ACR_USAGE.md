@@ -19,13 +19,32 @@ https://myregistry.azurecr.io/v2/team/echo/blobs/sha256:<digest>
 
 Direct blob URLs are still supported too.
 
-The master detects `azurecr.io`, mints a repository-scoped pull token using `DefaultAzureCredential`, fetches the manifest when needed, forwards the pull token to the worker as `jit_bearer_token`, and the worker sends it as:
+The master detects `azurecr.io`, gets a repository-scoped pull token using `DefaultAzureCredential`, fetches the manifest when needed, forwards the pull token to the worker as `jit_bearer_token`, and the worker sends it as:
 
 ```text
 Authorization: Bearer <token>
 ```
 
 Manifest resolution is intentionally handled by the master. The worker stays simple: it downloads the final WASM bytes, compiles them, and executes the module.
+
+## Token Cache Lifecycle
+
+ACR pull tokens are cached inside the master process by registry and repository:
+
+```text
+<registry-name>/<repository-name>
+```
+
+For example, `myregistry/team/echo` and `myregistry/team/payments` receive separate cached tokens because ACR scopes pull access to a repository.
+
+The cache uses the `expires_in` value returned by the ACR token endpoint. If ACR omits that value, the master uses a conservative 5 minute TTL. Cached tokens are refreshed 30 seconds before expiry so workers do not receive credentials that can expire during module download.
+
+Important operating notes:
+
+- The cache is in-memory only. Restarting the master clears it.
+- Failed Azure or ACR token requests are not cached; the next request retries the mint flow.
+- The cache reduces calls to Azure identity and ACR OAuth endpoints during repeated executions of the same repository.
+- Authorization changes in Azure may not take effect for an already cached token until the token expires or the master restarts.
 
 ## Azure Identity Setup
 
@@ -86,6 +105,6 @@ low 32 bits  = output length
 
 - The worker performs a simple HTTP GET and compiles the response body as raw WASM.
 - Manifest layer selection is conservative: one layer is accepted, or a known WASM media type is selected from multiple layers.
-- Token caching is not implemented; the master mints a token per ACR execution request.
-- Module download size limits and HTTP client timeouts are still needed.
-- The worker cache key is `module_name`, so changing a digest while reusing the same name may keep the old compiled module until restart.
+- Token caching is process-local; multiple master instances do not share cached ACR tokens.
+- Module downloads use the shared bounded HTTP client and worker module size limits.
+- The worker cache prefers digest-aware keys when the master resolves an ACR manifest to an immutable layer digest.

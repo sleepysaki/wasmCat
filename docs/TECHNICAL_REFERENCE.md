@@ -52,7 +52,7 @@ The core responsibility is to execute WASM modules on registered workers without
 3. `Dispatcher.Dispatch` normalizes module URL fields.
 4. If the URL points at `*.azurecr.io`, the dispatcher:
    - parses the ACR reference,
-   - mints an ACR bearer token,
+   - gets a repository-scoped ACR bearer token from the master token cache,
    - fetches the OCI manifest for manifest URLs,
    - selects a WASM layer,
    - rewrites the request to the layer blob URL.
@@ -157,8 +157,8 @@ The core responsibility is to execute WASM modules on registered workers without
 
 ### `internal/master/acr_token.go`
 
-- **Name & Responsibility:** Mints repository-scoped ACR pull tokens using Azure identity and ACR OAuth exchange endpoints.
-- **State & Properties:** Response structs for refresh token and access token JSON.
+- **Name & Responsibility:** Provides repository-scoped ACR pull tokens using an in-memory TTL cache backed by Azure identity and ACR OAuth exchange endpoints.
+- **State & Properties:** `ACRTokenProvider` stores cached tokens by `<registry>/<repository>`, expiry timestamps, a clock function, and a mint function. Response structs decode ACR refresh and access token JSON, including `expires_in`.
 - **Interactions:** `Dispatcher.Dispatch` calls `GenerateACRToken` for ACR URLs.
 
 ### `internal/worker/server.go`
@@ -723,9 +723,34 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func GenerateACRToken(ctx context.Context, registryName string, repositoryName string) (string, error)`
 
 - **Parameters:** Azure registry name without `.azurecr.io`, repository name.
-- **Return Values:** Repository-scoped ACR pull access token.
-- **Error Handling:** Missing inputs, Azure credential creation, AAD token acquisition, JWT tenant extraction, exchange/token endpoint failures.
-- **Side Effects:** Uses Azure DefaultAzureCredential chain and network calls.
+- **Return Values:** Repository-scoped ACR pull access token from the process-local provider cache, or from the ACR OAuth flow on cache miss/refresh.
+- **Error Handling:** Missing inputs, Azure credential creation, AAD token acquisition, JWT tenant extraction, exchange/token endpoint failures, empty minted token.
+- **Side Effects:** May use Azure DefaultAzureCredential chain and network calls; mutates the in-memory token cache on successful mint.
+
+##### `func NewACRTokenProvider() *ACRTokenProvider`
+
+- **Return Values:** Production ACR token provider using `generateACRTokenUncached` and `time.Now`.
+- **Side Effects:** Allocates an empty in-memory token map.
+
+##### `func NewACRTokenProviderWithOptions(mint ACRTokenMintFunc, now func() time.Time) *ACRTokenProvider`
+
+- **Parameters:** Optional token mint function and optional clock function.
+- **Return Values:** Token provider configured with supplied hooks, falling back to production defaults when nil.
+- **Side Effects:** Allocates an empty in-memory token map.
+
+##### `func (p *ACRTokenProvider) Token(ctx context.Context, registryName string, repositoryName string) (string, error)`
+
+- **Parameters:** Request context, Azure registry name without `.azurecr.io`, repository name.
+- **Return Values:** Cached token if it expires more than 30 seconds in the future; otherwise a freshly minted token.
+- **Error Handling:** Missing inputs, mint function errors, empty minted token.
+- **Side Effects:** Reads and writes the provider cache under a mutex; may trigger Azure and ACR network I/O through the mint function.
+
+##### `func generateACRTokenUncached(ctx context.Context, registryName string, repositoryName string) (string, time.Duration, error)`
+
+- **Parameters:** Request context, Azure registry name without `.azurecr.io`, repository name.
+- **Return Values:** Fresh repository-scoped ACR pull access token and TTL.
+- **Error Handling:** Azure credential creation, AAD token acquisition, JWT tenant extraction, exchange/token endpoint failures.
+- **Side Effects:** Uses Azure DefaultAzureCredential chain and ACR OAuth network calls.
 
 ##### `func exchangeAADTokenForRefreshToken(ctx context.Context, service string, tenantID string, aadToken string) (string, error)`
 
@@ -733,9 +758,9 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Error Handling:** Request creation, network errors, non-200 status with body, JSON decode errors, missing `refresh_token`.
 - **Side Effects:** HTTP POST to `https://<service>/oauth2/exchange`.
 
-##### `func exchangeRefreshTokenForAccessToken(ctx context.Context, service string, repositoryName string, refreshToken string) (string, error)`
+##### `func exchangeRefreshTokenForAccessToken(ctx context.Context, service string, repositoryName string, refreshToken string) (string, time.Duration, error)`
 
-- **Return Values:** ACR access token scoped to `repository:<repositoryName>:pull`.
+- **Return Values:** ACR access token scoped to `repository:<repositoryName>:pull` and token TTL. If ACR omits `expires_in`, the TTL defaults to 5 minutes.
 - **Error Handling:** Request creation, network errors, non-200 status with body, JSON decode errors, missing `access_token`.
 - **Side Effects:** HTTP POST to `https://<service>/oauth2/token`.
 
@@ -1050,7 +1075,7 @@ output_len = uint32(result)
 - **Worker coordinates default to zero:** Operators must set `WORKER_LATITUDE` and `WORKER_LONGITUDE`; otherwise workers appear at `0,0`.
 - **Capacity thresholds are opt-in:** Defaults are zero, so every worker remains eligible unless operators set `MIN_WORKER_CPU_FREE` or `MIN_WORKER_RAM_FREE_MB`.
 - **Registry cleanup age is fixed:** `Registry.Cleanup` removes nodes older than 30 seconds. `CLEANUP_INTERVAL` controls how often cleanup runs, not the expiration age.
-- **ACR token generation is uncached:** Each ACR dispatch can perform Azure credential lookup and token exchange.
+- **ACR token cache is process-local:** Repeated dispatches for the same registry repository reuse a token until 30 seconds before expiry. Multiple master instances do not share token cache state.
 - **HTTP clients are bounded:** Shared client defaults set total request, dial, TLS handshake, response-header, idle connection, and pool limits. Request contexts still provide operation-specific cancellation.
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
