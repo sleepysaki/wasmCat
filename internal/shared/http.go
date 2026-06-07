@@ -25,8 +25,20 @@ func WriteError(w http.ResponseWriter, status int, code string, err error) {
 	})
 }
 
+func RequireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method == method {
+		return true
+	}
+
+	w.Header().Set("Allow", method)
+	WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", nil)
+	return false
+}
+
 func PublicErrorMessage(code string) string {
 	switch code {
+	case "method_not_allowed":
+		return "HTTP method is not allowed for this endpoint."
 	case "invalid_worker_data":
 		return "Invalid worker registration request."
 	case "invalid_heartbeat":

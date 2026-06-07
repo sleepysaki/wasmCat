@@ -72,6 +72,30 @@ func TestMasterReadyzReturnsUnavailableWhenDependenciesMissing(t *testing.T) {
 	}
 }
 
+func TestMasterRejectsUnexpectedMethod(t *testing.T) {
+	gateway := newReadyGateway()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/execute", nil)
+	rec := httptest.NewRecorder()
+
+	gateway.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status 405, got %d", rec.Code)
+	}
+	if rec.Header().Get("Allow") != http.MethodPost {
+		t.Fatalf("expected Allow POST, got %q", rec.Header().Get("Allow"))
+	}
+
+	var resp shared.ErrorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode method error: %v", err)
+	}
+	if resp.Code != "method_not_allowed" {
+		t.Fatalf("expected method_not_allowed code, got %q", resp.Code)
+	}
+}
+
 func newReadyGateway() *master.Gateway {
 	registry := master.NewRegistry()
 	return &master.Gateway{

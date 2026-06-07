@@ -45,6 +45,10 @@ func (g *Gateway) Handler() http.Handler {
 }
 
 func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+
 	shared.WriteJSON(w, http.StatusOK, shared.HealthResponse{
 		Status: "ok",
 		Role:   "master",
@@ -52,6 +56,10 @@ func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleReady(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+
 	// Readiness means the gateway has the dependencies needed to accept and dispatch work.
 	// A live process with a nil registry or dispatcher should not receive traffic yet.
 	if g.Registry == nil || g.Dispatcher == nil || g.Dispatcher.Scheduler == nil {
@@ -66,6 +74,10 @@ func (g *Gateway) handleReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+
 	activeWorkers := 0
 	workersByState := map[string]int{}
 	var oldestHeartbeatSeconds *int64
@@ -79,6 +91,10 @@ func (g *Gateway) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+
 	// Create empty box for the incoming worker data, decode the JSON from the request body into that box, and check for errors
 	var node shared.WorkerNode
 	err := json.NewDecoder(r.Body).Decode(&node)
@@ -103,6 +119,10 @@ func (g *Gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+
 	var beat shared.Heartbeat
 
 	err := json.NewDecoder(r.Body).Decode(&beat)
@@ -125,6 +145,10 @@ func (g *Gateway) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleDrain(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+
 	var req shared.DrainRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid_drain_request", err)
@@ -201,6 +225,10 @@ func (g *Gateway) Start(ctx context.Context, port string) error {
 }
 
 func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+
 	var req shared.ExecutionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)

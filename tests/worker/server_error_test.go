@@ -43,3 +43,24 @@ func TestWorkerServerReturnsJSONErrorForInvalidRequest(t *testing.T) {
 		t.Fatalf("public error leaked internal validation detail: %q", errResp.Error)
 	}
 }
+
+func TestWorkerInvokeReturnsUnavailableWhenEngineMissing(t *testing.T) {
+	server := &worker.WorkerServer{NodeID: "worker-test"}
+
+	req := httptest.NewRequest(http.MethodPost, "/invoke", strings.NewReader(`{"module_name":"echo","module_url":"http://module.test/echo.wasm","payload":"hello"}`))
+	rec := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503, got %d", rec.Code)
+	}
+
+	var errResp shared.ErrorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp.Code != "not_ready" {
+		t.Fatalf("expected not_ready code, got %q", errResp.Code)
+	}
+}

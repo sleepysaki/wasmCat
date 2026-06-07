@@ -40,3 +40,28 @@ func TestPublicErrorMessageFallsBackForUnknownCodes(t *testing.T) {
 		t.Fatalf("expected fallback public message, got %q", got)
 	}
 }
+
+func TestRequireMethodRejectsUnexpectedMethod(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/execute", nil)
+	rec := httptest.NewRecorder()
+
+	ok := shared.RequireMethod(rec, req, http.MethodPost)
+
+	if ok {
+		t.Fatal("expected method guard to reject request")
+	}
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status 405, got %d", rec.Code)
+	}
+	if rec.Header().Get("Allow") != http.MethodPost {
+		t.Fatalf("expected Allow POST, got %q", rec.Header().Get("Allow"))
+	}
+
+	var response shared.ErrorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if response.Code != "method_not_allowed" {
+		t.Fatalf("expected method_not_allowed code, got %q", response.Code)
+	}
+}

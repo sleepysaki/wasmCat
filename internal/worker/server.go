@@ -34,6 +34,10 @@ func (s *WorkerServer) Handler() http.Handler {
 }
 
 func (s *WorkerServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+
 	shared.WriteJSON(w, http.StatusOK, shared.HealthResponse{
 		Status: "ok",
 		NodeID: s.NodeID,
@@ -42,6 +46,10 @@ func (s *WorkerServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WorkerServer) handleReady(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+
 	// Readiness means the worker has the engine dependency needed to execute modules.
 	// This does not prove a specific module URL is reachable; that remains per-request work.
 	if s.Engine == nil {
@@ -57,6 +65,10 @@ func (s *WorkerServer) handleReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WorkerServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+
 	var cacheStats shared.ModuleCacheStats
 	if s.Engine != nil {
 		cacheStats = s.Engine.CacheStats()
@@ -67,6 +79,14 @@ func (s *WorkerServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 // Logic handler
 func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if s.Engine == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "not_ready", fmt.Errorf("worker engine is not initialized"))
+		return
+	}
+
 	start := time.Now()
 
 	// Limit the HTTP body before JSON decoding.

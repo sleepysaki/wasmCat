@@ -553,6 +553,13 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Error Handling:** Unknown codes use the generic public message `Request failed.`
 - **Side Effects:** Logs the internal error with `slog.Warn` and writes a JSON error response with a safe public message.
 
+##### `func RequireMethod(w http.ResponseWriter, r *http.Request, method string) bool`
+
+- **Parameters:** Response writer, incoming request, and required HTTP method.
+- **Return Values:** True when the request method matches; false when the handler should stop.
+- **Error Handling:** Writes 405 `method_not_allowed` and an `Allow` header when the method is wrong.
+- **Side Effects:** May write HTTP headers and JSON error response.
+
 ##### `func PublicErrorMessage(code string) string`
 
 - **Parameters:** Machine-readable error code.
@@ -591,7 +598,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** JSON `shared.WorkerNode` in request body.
 - **Return Values:** 200 `APIResponse`.
-- **Error Handling:** 400 invalid JSON. No explicit method check.
+- **Error Handling:** 405 wrong method, 400 invalid JSON, 403 certificate identity mismatch.
 - **Side Effects:** Mutates registry.
 
 ##### `func (g *Gateway) handleHeartbeat(w http.ResponseWriter, r *http.Request)`
@@ -1045,21 +1052,21 @@ Worker init validates that `--master-url` is HTTPS and that numeric limits are p
 
 All runtime endpoints are served over HTTPS with mTLS enabled.
 
-| Component | Endpoint | Expected Body | Success Response | Failure Modes |
-| --- | --- | --- | --- | --- |
-| Master | `/wasmcat/health` | none | `HealthResponse` | JSON encode failure only. |
-| Master | `/wasmcat/ready` | none | `HealthResponse` | 503 if registry, dispatcher, or scheduler is nil. |
-| Master | `/wasmcat/metrics` | none | `MetricsResponse` | JSON encode failure only. |
-| Master | `/internal/register` | `WorkerNode` | `APIResponse` | 400 invalid JSON, 403 certificate identity mismatch. |
-| Master | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
-| Master | `/internal/drain` | `DrainRequest` | `APIResponse` | 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
-| Master | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 400 invalid JSON/request, 503 dispatch failure. |
-| Worker | `/wasmcat/health` | none | `HealthResponse` | JSON encode failure only. |
-| Worker | `/wasmcat/ready` | none | `HealthResponse` | 503 if engine is nil. |
-| Worker | `/wasmcat/metrics` | none | `MetricsResponse` | JSON encode failure only. |
-| Worker | `/invoke` | `ExecutionRequest` | `ExecutionResponse` | 400 invalid JSON/request/execution failure. |
+| Component | Method | Endpoint | Expected Body | Success Response | Failure Modes |
+| --- | --- | --- | --- | --- | --- |
+| Master | `GET` | `/wasmcat/health` | none | `HealthResponse` | 405 wrong method, JSON encode failure only. |
+| Master | `GET` | `/wasmcat/ready` | none | `HealthResponse` | 405 wrong method, 503 if registry, dispatcher, or scheduler is nil. |
+| Master | `GET` | `/wasmcat/metrics` | none | `MetricsResponse` | 405 wrong method, JSON encode failure only. |
+| Master | `POST` | `/internal/register` | `WorkerNode` | `APIResponse` | 405 wrong method, 400 invalid JSON, 403 certificate identity mismatch. |
+| Master | `POST` | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 405 wrong method, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
+| Master | `POST` | `/internal/drain` | `DrainRequest` | `APIResponse` | 405 wrong method, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
+| Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 400 invalid JSON/request, 503 dispatch failure. |
+| Worker | `GET` | `/wasmcat/health` | none | `HealthResponse` | 405 wrong method, JSON encode failure only. |
+| Worker | `GET` | `/wasmcat/ready` | none | `HealthResponse` | 405 wrong method, 503 if engine is nil. |
+| Worker | `GET` | `/wasmcat/metrics` | none | `MetricsResponse` | 405 wrong method, JSON encode failure only. |
+| Worker | `POST` | `/invoke` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 503 if engine is nil, 400 invalid JSON/request/execution failure. |
 
-The handlers do not currently enforce HTTP methods. Operational clients should still use the intended methods: `GET` for health/readiness and `POST` for registration, heartbeat, execute, and invoke.
+Wrong methods return JSON error code `method_not_allowed` and an `Allow` header with the required method.
 
 ### WASM Module ABI
 
@@ -1122,11 +1129,9 @@ output_len = uint32(result)
 - **Cold fetch coalescing is process-local:** Concurrent cold requests for the same cache key share one download/compile inside a worker process. Separate workers still compile independently.
 - **Request IDs are correlation only:** `request_id` is generated or propagated for tracing. It is not stored and does not provide idempotency.
 - **Health/readiness require mTLS:** Because TLS client auth is configured at server level, probes must present valid client certificates unless TLS routing changes.
-- **Worker invoke nil engine risk:** Readiness checks for nil engine, but `/invoke` accesses `s.Engine.Limits()` before a nil check. Normal startup always sets the engine.
 - **Development cert generation overwrites at runtime:** `GenerateCAAndCerts` uses `os.Create`. Production should set `AUTO_GENERATE_CERTS=false`; bootstrap protects generated files unless `--force` is used.
 - **Telemetry is host-level, not cgroup-level:** gopsutil reports host CPU and memory. It does not currently account for per-service cgroup quotas.
 - **No persistent state:** Registry and module cache are in memory. Master restart loses worker registry; worker restart loses compiled module cache.
-- **No method enforcement:** Handlers are path-based and do not reject unexpected HTTP methods.
 - **No authentication beyond mTLS:** There is no end-user authorization layer on `/api/v1/execute`; any valid client certificate trusted by the CA can call it.
 - **WASM ABI is narrow:** Modules must match the exact `memory`, `malloc`, and packed `run` ABI. WASI modules or modules with different host imports are not supported by the current engine path.
 
