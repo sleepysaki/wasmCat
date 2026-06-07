@@ -36,7 +36,10 @@ func TestWorkerServerReturnsJSONErrorForInvalidRequest(t *testing.T) {
 	if errResp.Code != "invalid_execution_request" {
 		t.Fatalf("expected invalid_execution_request code, got %q", errResp.Code)
 	}
-	if !strings.Contains(errResp.Error, "module_name is required") {
-		t.Fatalf("expected validation error, got %q", errResp.Error)
+	if errResp.Error != "Invalid execution request." {
+		t.Fatalf("expected safe validation error, got %q", errResp.Error)
+	}
+	if strings.Contains(errResp.Error, "module_name") {
+		t.Fatalf("public error leaked internal validation detail: %q", errResp.Error)
 	}
 }

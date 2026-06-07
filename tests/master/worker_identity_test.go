@@ -52,6 +52,12 @@ func TestGatewayRegisterRejectsMismatchedWorkerCertificateIdentity(t *testing.T)
 	if response.Code != "worker_identity_mismatch" {
 		t.Fatalf("expected worker_identity_mismatch, got %q", response.Code)
 	}
+	if response.Error != "Worker certificate identity does not match the requested worker ID." {
+		t.Fatalf("expected safe worker identity message, got %q", response.Error)
+	}
+	if strings.Contains(response.Error, "wasmcat-worker-worker-a") || strings.Contains(response.Error, "worker-b") {
+		t.Fatalf("public error leaked certificate detail: %q", response.Error)
+	}
 	if len(gateway.Registry.GetActiveWorkers()) != 0 {
 		t.Fatal("mismatched worker should not be registered")
 	}

@@ -111,7 +111,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Name & Responsibility:** Standardizes JSON and error responses.
 - **State & Properties:** No internal state.
-- **Interactions:** Master and worker handlers call `WriteJSON` and `WriteError`.
+- **Interactions:** Master and worker handlers call `WriteJSON` and `WriteError`. Error responses use safe public messages while raw errors are logged.
 
 ### `internal/shared/client.go`
 
@@ -505,8 +505,15 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** Response writer, HTTP status, machine-readable code, error.
 - **Return Values:** None.
-- **Error Handling:** Nil `err` produces an empty error message.
-- **Side Effects:** Writes JSON error response.
+- **Error Handling:** Unknown codes use the generic public message `Request failed.`
+- **Side Effects:** Logs the internal error with `slog.Warn` and writes a JSON error response with a safe public message.
+
+##### `func PublicErrorMessage(code string) string`
+
+- **Parameters:** Machine-readable error code.
+- **Return Values:** Safe client-facing message for known codes, or `Request failed.` for unknown codes.
+- **Error Handling:** None.
+- **Side Effects:** None.
 
 ### Master package
 
