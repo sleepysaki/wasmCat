@@ -2,6 +2,8 @@
 
 wasmCat uses bounded outbound HTTP clients for worker fetches, ACR calls, telemetry, and master-to-worker dispatch. This prevents slow or broken network peers from holding goroutines and sockets indefinitely.
 
+Inbound server timeout behavior is documented separately in [HTTP_SERVER_TIMEOUTS.md](HTTP_SERVER_TIMEOUTS.md).
+
 ## Covered Paths
 
 - Worker module downloads in `WasmEngine`.

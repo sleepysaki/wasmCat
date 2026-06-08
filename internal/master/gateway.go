@@ -220,11 +220,7 @@ func (g *Gateway) Start(ctx context.Context, port string) error {
 		MinVersion: tls.VersionTLS12,
 	}
 
-	server := &http.Server{
-		Addr:      ":" + port,
-		Handler:   g.Handler(),
-		TLSConfig: serverTLSConfig,
-	}
+	server := shared.NewHTTPServer(":"+port, g.Handler(), serverTLSConfig)
 
 	errCh := make(chan error, 1)
 	go func() {

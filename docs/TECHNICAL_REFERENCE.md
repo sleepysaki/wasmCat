@@ -125,6 +125,12 @@ The core responsibility is to execute WASM modules on registered workers without
 - **State & Properties:** Timeout and connection-pool constants for dial, TLS handshake, response headers, full request duration, idle connections, and idle pool size. Retry constants define 3 attempts and 100ms linear backoff.
 - **Interactions:** Worker module fetches, ACR manifest/token calls, dispatcher mTLS clients, and telemetry mTLS clients use this transport policy. ACR calls, module fetches, and telemetry use `DoWithRetry`; dispatcher `/invoke` remains single-shot to avoid duplicate module execution.
 
+### `internal/shared/server.go`
+
+- **Name & Responsibility:** Creates inbound HTTP servers with bounded read-header, read, write, and idle timeouts.
+- **State & Properties:** Server timeout constants: 5s read-header, 30s read, 30s write, and 60s idle.
+- **Interactions:** Master gateway and worker invoke server use this constructor before starting TLS listeners.
+
 ### `internal/master/gateway.go`
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
@@ -488,6 +494,12 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Error Handling:** Uses one attempt when policy attempts are zero or negative; returns an error when a retry needs a request body that cannot be recreated.
 - **Side Effects:** Sends outbound HTTP requests and drains retryable response bodies before the next attempt.
 
+##### `func NewHTTPServer(addr string, handler http.Handler, tlsConfig *tls.Config) *http.Server`
+
+- **Parameters:** Listen address, HTTP handler, optional TLS config.
+- **Return Values:** HTTP server with bounded read-header, read, write, and idle timeouts.
+- **Side Effects:** None until the server is started.
+
 ### Logging package
 
 ##### `func Configure(component string) *slog.Logger`
@@ -613,7 +625,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Parameters:** Shutdown context and listen port string.
 - **Return Values:** Nil on clean shutdown.
 - **Error Handling:** CA/cert read errors, TLS server errors, shutdown errors.
-- **Side Effects:** Starts HTTPS server requiring client certificates.
+- **Side Effects:** Starts timeout-bounded HTTPS server requiring client certificates.
 
 ##### `func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request)`
 
@@ -869,7 +881,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Parameters:** Shutdown context and port.
 - **Return Values:** Nil on clean shutdown.
 - **Error Handling:** CA/cert load failures, TLS server errors, shutdown errors.
-- **Side Effects:** Starts HTTPS server requiring client certificates.
+- **Side Effects:** Starts timeout-bounded HTTPS server requiring client certificates.
 
 ##### `func NewWasmEngine(ctx context.Context) *WasmEngine`
 
@@ -1148,6 +1160,7 @@ output_len = uint32(result)
 - **Registry cleanup age is fixed:** `Registry.Cleanup` removes nodes older than 30 seconds. `CLEANUP_INTERVAL` controls how often cleanup runs, not the expiration age.
 - **ACR token cache is process-local:** Repeated dispatches for the same registry repository reuse a token until 30 seconds before expiry. Multiple master instances do not share token cache state.
 - **HTTP clients are bounded:** Shared client defaults set total request, dial, TLS handshake, response-header, idle connection, and pool limits. Request contexts still provide operation-specific cancellation.
+- **HTTP servers are bounded:** Master and worker servers set read-header, read, write, and idle timeouts through the shared server factory.
 - **HTTP retries are bounded:** Safe outbound paths retry transient statuses and transport errors up to 3 attempts. Worker `/invoke` dispatch is not retried because it can execute user code.
 - **Master request bodies are bounded:** Internal worker control messages are capped at 4 KiB. `/api/v1/execute` uses `MAX_EXECUTION_REQUEST_BYTES`.
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.

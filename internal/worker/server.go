@@ -167,11 +167,7 @@ func (s *WorkerServer) Start(ctx context.Context, port string) error {
 		MinVersion: tls.VersionTLS12,
 	}
 
-	server := &http.Server{
-		Addr:      ":" + port,
-		Handler:   s.Handler(),
-		TLSConfig: tlsConfig,
-	}
+	server := shared.NewHTTPServer(":"+port, s.Handler(), tlsConfig)
 
 	certFile := security.WorkerCertPath(certDir, s.NodeID)
 	keyFile := security.WorkerKeyPath(certDir, s.NodeID)
