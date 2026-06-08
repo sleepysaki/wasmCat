@@ -30,7 +30,7 @@ The core responsibility is to execute WASM modules on registered workers without
 5. `config.LoadMaster` reads master environment variables.
 6. The process constructs `Registry`, `Scheduler`, `Dispatcher`, and `Gateway`.
 7. If `AUTO_GENERATE_CERTS=true`, `security.GenerateCAAndCerts` writes a local CA, master cert, and worker cert.
-8. A cleanup goroutine calls `Registry.Cleanup` on `CLEANUP_INTERVAL`.
+8. A cleanup goroutine calls `Registry.Cleanup` on `CLEANUP_INTERVAL`; `WORKER_STALE_TIMEOUT` decides which workers are old enough to remove.
 9. `Gateway.Start` loads CA/master certificates, creates an HTTPS server requiring client certificates, and blocks until shutdown or server error.
 
 #### Worker runtime lifecycle
@@ -69,7 +69,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Name & Responsibility:** Master process entrypoint. Handles `wasmcat-master init` and normal control-plane startup.
 - **State & Properties:** Local references to `MasterConfig`, `Registry`, `Scheduler`, `Dispatcher`, and `Gateway`; process root context; cleanup ticker.
-- **Interactions:** Calls `bootstrap.InitMaster`, `config.LoadMaster`, `security.GenerateCAAndCerts`, `master.NewRegistry`, `Gateway.Start`.
+- **Interactions:** Calls `bootstrap.InitMaster`, `config.LoadMaster`, `security.GenerateCAAndCerts`, `master.NewRegistryWithStaleTimeout`, `Gateway.Start`.
 
 ### `cmd/worker/main.go`
 
@@ -224,7 +224,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Return Values:** `error` only. Nil means config/cert directories and `master.env` were created successfully.
 - **Error Handling:** Returns flag parse errors and bootstrap validation/write errors.
 - **Side Effects:** Writes status lines to stdout through caller, creates directories/files through `bootstrap.InitMaster`.
-- **Flags:** `--config-dir`, `--cert-dir`, `--port`, `--cleanup-interval`, `--dev-worker-id`, `--dev-certs`, `--force`.
+- **Flags:** `--config-dir`, `--cert-dir`, `--port`, `--cleanup-interval`, `--worker-stale-timeout`, `--dev-worker-id`, `--dev-certs`, `--force`.
 
 ##### `func defaultConfigDir() string`
 
@@ -263,6 +263,7 @@ The core responsibility is to execute WASM modules on registered workers without
   - `CertDir string`: directory for certificates. Defaults to `<ConfigDir>/certs`.
   - `Port string`: master HTTPS port. Defaults to `7270`.
   - `CleanupInterval string`: duration string for registry cleanup ticker. Defaults to `15s`.
+  - `WorkerStaleTimeout string`: duration string for how long a worker may miss heartbeats before cleanup removes it. Defaults to `30s`.
   - `DevWorkerID string`: worker ID used when generating local dev certs. Defaults to `worker-vn-01`.
   - `GenerateDevCerts bool`: when true, writes local CA/master/worker certs.
   - `Force bool`: allows overwriting existing env or generated dev cert files.
@@ -299,7 +300,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** Normalized master options.
 - **Return Values:** Nil on valid input.
-- **Error Handling:** Missing config dir, cert dir, port, dev worker ID, or invalid cleanup duration.
+- **Error Handling:** Missing config dir, cert dir, port, dev worker ID, invalid cleanup interval, or invalid worker stale timeout.
 - **Side Effects:** None.
 
 ##### `func validateWorker(options WorkerOptions) error`
@@ -335,8 +336,8 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func LoadMaster() (MasterConfig, error)`
 
 - **Parameters:** None.
-- **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `MinWorkerCPUFree`, and `MinWorkerRAMFreeMB`.
-- **Error Handling:** Invalid `CLEANUP_INTERVAL`, `AUTO_GENERATE_CERTS`, `MIN_WORKER_CPU_FREE`, or `MIN_WORKER_RAM_FREE_MB`.
+- **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `WorkerStaleTimeout`, `MinWorkerCPUFree`, and `MinWorkerRAMFreeMB`.
+- **Error Handling:** Invalid `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `AUTO_GENERATE_CERTS`, `MIN_WORKER_CPU_FREE`, or `MIN_WORKER_RAM_FREE_MB`.
 - **Side Effects:** Reads process environment.
 
 ##### `func LoadWorker() (WorkerConfig, error)`
@@ -659,8 +660,19 @@ The core responsibility is to execute WASM modules on registered workers without
 
 ##### `func NewRegistry() *Registry`
 
-- **Return Values:** Registry with initialized worker map.
+- **Return Values:** Registry with initialized worker map and default `30s` worker stale timeout.
 - **Side Effects:** Allocates in-memory map.
+
+##### `func NewRegistryWithStaleTimeout(workerStaleTimeout time.Duration) *Registry`
+
+- **Parameters:** `workerStaleTimeout` controls how old `LastSeen` can become before cleanup removes a worker. Non-positive values fall back to `DefaultWorkerStaleTimeout`.
+- **Return Values:** Registry with initialized worker map and configured stale timeout.
+- **Side Effects:** Allocates in-memory map.
+
+##### `func (r *Registry) WorkerStaleTimeout() time.Duration`
+
+- **Return Values:** Configured worker stale timeout.
+- **Side Effects:** None.
 
 ##### `func (r *Registry) RegisterWorker(worker shared.WorkerNode)`
 
@@ -691,7 +703,13 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func (r *Registry) Cleanup()`
 
 - **Return Values:** None.
-- **Side Effects:** Deletes workers whose `LastSeen` is older than 30 seconds.
+- **Side Effects:** Deletes workers whose `LastSeen` is older than the registry stale timeout using the current time.
+
+##### `func (r *Registry) CleanupAt(now time.Time)`
+
+- **Parameters:** `now` is the reference time used to compare worker `LastSeen` values. This keeps cleanup deterministic in tests.
+- **Return Values:** None.
+- **Side Effects:** Deletes workers whose `LastSeen` is older than the registry stale timeout.
 
 ##### `func (s *Scheduler) SelectWorker(userLat, userLon float64, workers []shared.WorkerNode) (shared.WorkerNode, error)`
 
@@ -1029,7 +1047,8 @@ The core responsibility is to execute WASM modules on registered workers without
 | `CERT_DIR` | `./certs` | Filesystem path | Directory containing `ca.crt`, `master.crt`, and `master.key`. |
 | `AUTO_GENERATE_CERTS` | `true` | Go boolean string | When true, master startup writes local development certs. Set false in production. |
 | `DEV_WORKER_ID` | `worker-vn-01` | string | Worker ID used for local dev cert generation. |
-| `CLEANUP_INTERVAL` | `15s` | Go duration | Frequency for registry cleanup ticker. Cleanup removes workers older than 30 seconds. |
+| `CLEANUP_INTERVAL` | `15s` | Go duration | Frequency for registry cleanup scans. |
+| `WORKER_STALE_TIMEOUT` | `30s` | Go duration | Maximum time since a worker heartbeat before cleanup removes that registry entry. |
 | `MIN_WORKER_CPU_FREE` | `0` | float percentage | Minimum reported free CPU required before the scheduler can select a worker. |
 | `MIN_WORKER_RAM_FREE_MB` | `0` | float MiB | Minimum reported free RAM required before the scheduler can select a worker. |
 | `EXECUTE_CLIENT_ALLOWLIST` | empty | comma-separated certificate identities | Optional client certificate CN or DNS SAN allowlist for `/api/v1/execute`. Empty allows any trusted mTLS client. |
@@ -1068,6 +1087,7 @@ wasmcat-master init \
   --cert-dir /etc/wasmcat/certs \
   --port 7270 \
   --cleanup-interval 15s \
+  --worker-stale-timeout 30s \
   --dev-worker-id worker-vn-01
 ```
 
@@ -1158,7 +1178,7 @@ output_len = uint32(result)
 
 - **Worker coordinates default to zero:** Operators must set `WORKER_LATITUDE` and `WORKER_LONGITUDE`; otherwise workers appear at `0,0`.
 - **Capacity thresholds are opt-in:** Defaults are zero, so every worker remains eligible unless operators set `MIN_WORKER_CPU_FREE` or `MIN_WORKER_RAM_FREE_MB`.
-- **Registry cleanup age is fixed:** `Registry.Cleanup` removes nodes older than 30 seconds. `CLEANUP_INTERVAL` controls how often cleanup runs, not the expiration age.
+- **Registry cleanup is timer-based:** `CLEANUP_INTERVAL` controls scan cadence and `WORKER_STALE_TIMEOUT` controls eviction age. Set stale timeout higher than heartbeat interval to tolerate normal jitter.
 - **ACR token cache is process-local:** Repeated dispatches for the same registry repository reuse a token until 30 seconds before expiry. Multiple master instances do not share token cache state.
 - **HTTP clients are bounded:** Shared client defaults set total request, dial, TLS handshake, response-header, idle connection, and pool limits. Request contexts still provide operation-specific cancellation.
 - **HTTP servers are bounded:** Master and worker servers set read-header, read, write, and idle timeouts through the shared server factory.

@@ -13,7 +13,8 @@ Execution client authorization is documented in [EXECUTION_AUTHORIZATION.md](EXE
 | `CERT_DIR` | `./certs` | Directory containing `ca.crt`, `master.crt`, `master.key`, and worker certs. |
 | `AUTO_GENERATE_CERTS` | `true` | Generate local development CA/master/worker certs on master startup. Disable in production. |
 | `DEV_WORKER_ID` | `worker-vn-01` | Worker ID used by local dev certificate generation. |
-| `CLEANUP_INTERVAL` | `15s` | How often the master removes stale workers from the registry. |
+| `CLEANUP_INTERVAL` | `15s` | How often the master scans the registry for stale workers. |
+| `WORKER_STALE_TIMEOUT` | `30s` | How long a worker may go without heartbeat updates before cleanup removes it. |
 | `MIN_WORKER_CPU_FREE` | `0` | Minimum free CPU percentage required for a worker to receive new work. |
 | `MIN_WORKER_RAM_FREE_MB` | `0` | Minimum free RAM in MiB required for a worker to receive new work. |
 | `EXECUTE_CLIENT_ALLOWLIST` | empty | Comma-separated client certificate CN or DNS SAN values allowed to call `/api/v1/execute`. Empty means any trusted mTLS client can execute work. |

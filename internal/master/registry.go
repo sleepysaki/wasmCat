@@ -8,19 +8,37 @@ import (
 	"wasmcat/internal/shared"
 )
 
+const DefaultWorkerStaleTimeout = 30 * time.Second
+
 // Registry maintains the state of all active workers in the cluster
 type Registry struct {
 	workers map[string]shared.WorkerNode
 	// To handle concurrent access to the registry
 	mu sync.RWMutex
+	// How long a worker can miss heartbeat updates before the master removes it.
+	// This is separate from cleanup interval: interval decides when we scan, timeout decides what is stale.
+	workerStaleTimeout time.Duration
 }
 
 func NewRegistry() *Registry {
+	return NewRegistryWithStaleTimeout(DefaultWorkerStaleTimeout)
+}
+
+func NewRegistryWithStaleTimeout(workerStaleTimeout time.Duration) *Registry {
+	if workerStaleTimeout <= 0 {
+		workerStaleTimeout = DefaultWorkerStaleTimeout
+	}
+
 	return &Registry{
-		workers: make(map[string]shared.WorkerNode),
+		workers:            make(map[string]shared.WorkerNode),
+		workerStaleTimeout: workerStaleTimeout,
 		// make() initializes the map to avoid nil map errors
 		// new() return a pointer to an empty struct
 	}
+}
+
+func (r *Registry) WorkerStaleTimeout() time.Duration {
+	return r.workerStaleTimeout
 }
 
 func (r *Registry) RegisterWorker(worker shared.WorkerNode) {
@@ -150,15 +168,24 @@ func (r *Registry) OldestHeartbeatAge(now time.Time) *int64 {
 	return &age
 }
 
-// Clean up workers that haven't sent a heartbeat in the last 30 seconds
+// Clean up workers that haven't sent a heartbeat within the configured stale timeout.
 func (r *Registry) Cleanup() {
+	r.CleanupAt(time.Now())
+}
+
+func (r *Registry) CleanupAt(now time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	for id, node := range r.workers {
-		if time.Since(node.LastSeen) > 30*time.Second {
+		if now.Sub(node.LastSeen) > r.workerStaleTimeout {
 			delete(r.workers, id)
-			slog.Info("worker removed after missed heartbeat", "worker_id", id, "last_seen", node.LastSeen)
+			slog.Info(
+				"worker removed after missed heartbeat",
+				"worker_id", id,
+				"last_seen", node.LastSeen,
+				"stale_timeout", r.workerStaleTimeout.String(),
+			)
 		}
 	}
 }

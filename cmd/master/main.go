@@ -42,8 +42,8 @@ func main() {
 
 	// Create the State Registry
 	// Initialize the thread-safe map (Mutex) for tracking workers.
-	reg := master.NewRegistry()
-	slog.Info("state registry initialized")
+	reg := master.NewRegistryWithStaleTimeout(cfg.WorkerStaleTimeout)
+	slog.Info("state registry initialized", "worker_stale_timeout", cfg.WorkerStaleTimeout.String())
 
 	// Create the Scheduler
 	sched := &master.Scheduler{
@@ -82,9 +82,9 @@ func main() {
 
 	// Start the background garbage collection
 	// Run completely independently of the web server
-	// Every 15 seconds, it scrubs the Registry for dead edge nodes
+	// Every cleanup interval, it scrubs the Registry for workers older than the stale timeout.
 	go func() {
-		slog.Info("background reaper started", "interval", cfg.CleanupInterval.String())
+		slog.Info("background reaper started", "interval", cfg.CleanupInterval.String(), "worker_stale_timeout", cfg.WorkerStaleTimeout.String())
 		ticker := time.NewTicker(cfg.CleanupInterval)
 		defer ticker.Stop()
 		for {
@@ -120,6 +120,7 @@ func runInit(args []string) error {
 	certDir := flags.String("cert-dir", "", "directory for mTLS certificates; defaults to <config-dir>/certs")
 	port := flags.String("port", "7270", "master HTTPS port")
 	cleanupInterval := flags.String("cleanup-interval", "15s", "registry cleanup interval")
+	workerStaleTimeout := flags.String("worker-stale-timeout", "30s", "how long a worker can miss heartbeats before registry cleanup removes it")
 	minWorkerCPUFree := flags.Float64("min-worker-cpu-free", 0, "minimum free CPU percent required for scheduling")
 	minWorkerRAMFreeMB := flags.Float64("min-worker-ram-free-mb", 0, "minimum free RAM in MiB required for scheduling")
 	executeClientAllowlist := flags.String("execute-client-allowlist", "", "comma-separated client certificate CN or DNS SAN values allowed to call /api/v1/execute")
@@ -137,6 +138,7 @@ func runInit(args []string) error {
 		CertDir:             *certDir,
 		Port:                *port,
 		CleanupInterval:     *cleanupInterval,
+		WorkerStaleTimeout:  *workerStaleTimeout,
 		MinWorkerCPUFree:    *minWorkerCPUFree,
 		MinWorkerRAMFreeMB:  *minWorkerRAMFreeMB,
 		ExecuteClientIDs:    *executeClientAllowlist,
