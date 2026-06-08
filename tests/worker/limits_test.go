@@ -24,6 +24,15 @@ func TestExecuteRejectsOversizedPayload(t *testing.T) {
 	}
 }
 
+func TestWorkerLimitsDefaultShutdownTimeoutFollowsExecutionTimeout(t *testing.T) {
+	ctx := context.Background()
+	engine := worker.NewWasmEngineWithLimits(ctx, worker.Limits{ExecutionTimeout: 20 * time.Second})
+
+	if engine.Limits().ShutdownTimeout != 25*time.Second {
+		t.Fatalf("expected shutdown timeout 25s, got %s", engine.Limits().ShutdownTimeout)
+	}
+}
+
 func TestFetchAndCacheRejectsOversizedModule(t *testing.T) {
 	ctx := context.Background()
 

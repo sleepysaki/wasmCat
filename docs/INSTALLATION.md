@@ -203,6 +203,7 @@ sudo wasmcat-worker init \
   --advertise-address worker-us-01.example.com:7271 \
   --latitude 40.7128 \
   --longitude -74.0060 \
+  --worker-shutdown-timeout 10s \
   --max-cached-modules 128 \
   --max-cache-bytes 268435456 \
   --module-cache-ttl 30m \
@@ -226,6 +227,7 @@ WORKER_ADVERTISE_ADDRESS=worker-us-01.example.com:7271
 WORKER_LATITUDE=40.7128
 WORKER_LONGITUDE=-74.006
 CERT_DIR=/etc/wasmcat/certs
+WORKER_SHUTDOWN_TIMEOUT=10s
 MAX_CONCURRENT_EXECS=4
 MAX_CACHED_MODULES=128
 MAX_CACHE_BYTES=268435456

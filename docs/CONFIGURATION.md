@@ -40,6 +40,7 @@ Worker registration and heartbeat require the mTLS client certificate identity t
 | --- | --- | --- |
 | `EXECUTION_TIMEOUT` | `5s` | Max time for a worker execution path. |
 | `MODULE_FETCH_TIMEOUT` | `10s` | Max time to fetch and compile a module. |
+| `WORKER_SHUTDOWN_TIMEOUT` | `10s` | Max graceful shutdown time for in-flight worker HTTP requests. Defaults to `EXECUTION_TIMEOUT + 5s` when unset. |
 | `MAX_MODULE_BYTES` | `10485760` | Max downloaded module size. |
 | `MAX_PAYLOAD_BYTES` | `1048576` | Max request payload size. |
 | `MAX_OUTPUT_BYTES` | `1048576` | Max WASM output size. |

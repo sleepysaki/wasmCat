@@ -11,6 +11,7 @@ import (
 type Limits struct {
 	ExecutionTimeout   time.Duration
 	ModuleFetchTimeout time.Duration
+	ShutdownTimeout    time.Duration
 	MaxModuleBytes     int64
 	MaxPayloadBytes    int64
 	MaxOutputBytes     uint32
@@ -146,6 +147,7 @@ func loadWorkerLimits() (Limits, error) {
 	defaults := Limits{
 		ExecutionTimeout:   5 * time.Second,
 		ModuleFetchTimeout: 10 * time.Second,
+		ShutdownTimeout:    10 * time.Second,
 		MaxModuleBytes:     10 << 20,
 		MaxPayloadBytes:    1 << 20,
 		MaxOutputBytes:     1 << 20,
@@ -160,6 +162,10 @@ func loadWorkerLimits() (Limits, error) {
 		return Limits{}, err
 	}
 	moduleFetchTimeout, err := durationEnv("MODULE_FETCH_TIMEOUT", defaults.ModuleFetchTimeout)
+	if err != nil {
+		return Limits{}, err
+	}
+	shutdownTimeout, err := durationEnv("WORKER_SHUTDOWN_TIMEOUT", executionTimeout+5*time.Second)
 	if err != nil {
 		return Limits{}, err
 	}
@@ -195,6 +201,7 @@ func loadWorkerLimits() (Limits, error) {
 	return Limits{
 		ExecutionTimeout:   executionTimeout,
 		ModuleFetchTimeout: moduleFetchTimeout,
+		ShutdownTimeout:    shutdownTimeout,
 		MaxModuleBytes:     maxModuleBytes,
 		MaxPayloadBytes:    maxPayloadBytes,
 		MaxOutputBytes:     maxOutputBytes,

@@ -103,6 +103,7 @@ func TestInitWorkerWritesEnv(t *testing.T) {
 		AdvertiseAddress:   "worker-us-01.example.com:9444",
 		Latitude:           40.7128,
 		Longitude:          -74.006,
+		ShutdownTimeout:    "9s",
 		MaxModuleBytes:     10 << 20,
 		MaxPayloadBytes:    1 << 20,
 		MaxOutputBytes:     1 << 20,
@@ -122,6 +123,7 @@ func TestInitWorkerWritesEnv(t *testing.T) {
 	assertContains(t, env, "WORKER_ADVERTISE_ADDRESS=worker-us-01.example.com:9444\n")
 	assertContains(t, env, "WORKER_LATITUDE=40.7128\n")
 	assertContains(t, env, "WORKER_LONGITUDE=-74.006\n")
+	assertContains(t, env, "WORKER_SHUTDOWN_TIMEOUT=9s\n")
 	assertContains(t, env, "MAX_CONCURRENT_EXECS=8\n")
 	assertContains(t, env, "MAX_CACHED_MODULES=16\n")
 	assertContains(t, env, "MAX_CACHE_BYTES=67108864\n")

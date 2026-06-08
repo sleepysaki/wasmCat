@@ -5,6 +5,7 @@ import "time"
 type Limits struct {
 	ExecutionTimeout   time.Duration
 	ModuleFetchTimeout time.Duration
+	ShutdownTimeout    time.Duration
 	MaxModuleBytes     int64
 	MaxPayloadBytes    int64
 	MaxOutputBytes     uint32
@@ -17,6 +18,7 @@ type Limits struct {
 var DefaultLimits = Limits{
 	ExecutionTimeout:   5 * time.Second,
 	ModuleFetchTimeout: 10 * time.Second,
+	ShutdownTimeout:    10 * time.Second,
 	MaxModuleBytes:     10 << 20, // 10 MiB
 	MaxPayloadBytes:    1 << 20,  // 1 MiB
 	MaxOutputBytes:     1 << 20,  // 1 MiB
@@ -34,6 +36,9 @@ func normalizeLimits(limits Limits) Limits {
 	}
 	if limits.ModuleFetchTimeout <= 0 {
 		limits.ModuleFetchTimeout = DefaultLimits.ModuleFetchTimeout
+	}
+	if limits.ShutdownTimeout <= 0 {
+		limits.ShutdownTimeout = limits.ExecutionTimeout + 5*time.Second
 	}
 	if limits.MaxModuleBytes <= 0 {
 		limits.MaxModuleBytes = DefaultLimits.MaxModuleBytes

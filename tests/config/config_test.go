@@ -17,6 +17,7 @@ func TestLoadWorkerReadsEnvironment(t *testing.T) {
 	t.Setenv("HEARTBEAT_INTERVAL", "2s")
 	t.Setenv("EXECUTION_TIMEOUT", "3s")
 	t.Setenv("MODULE_FETCH_TIMEOUT", "4s")
+	t.Setenv("WORKER_SHUTDOWN_TIMEOUT", "6s")
 	t.Setenv("MAX_MODULE_BYTES", "100")
 	t.Setenv("MAX_PAYLOAD_BYTES", "50")
 	t.Setenv("MAX_OUTPUT_BYTES", "25")
@@ -59,6 +60,9 @@ func TestLoadWorkerReadsEnvironment(t *testing.T) {
 	}
 	if cfg.Limits.ModuleFetchTimeout != 4*time.Second {
 		t.Fatalf("expected module fetch timeout 4s, got %s", cfg.Limits.ModuleFetchTimeout)
+	}
+	if cfg.Limits.ShutdownTimeout != 6*time.Second {
+		t.Fatalf("expected shutdown timeout 6s, got %s", cfg.Limits.ShutdownTimeout)
 	}
 	if cfg.Limits.MaxModuleBytes != 100 {
 		t.Fatalf("expected max module bytes 100, got %d", cfg.Limits.MaxModuleBytes)
@@ -144,5 +148,18 @@ func TestLoadWorkerRejectsInvalidCoordinates(t *testing.T) {
 	_, err := config.LoadWorker()
 	if err == nil {
 		t.Fatal("expected invalid latitude error")
+	}
+}
+
+func TestLoadWorkerDefaultsShutdownTimeoutFromExecutionTimeout(t *testing.T) {
+	t.Setenv("EXECUTION_TIMEOUT", "20s")
+
+	cfg, err := config.LoadWorker()
+	if err != nil {
+		t.Fatalf("LoadWorker returned error: %v", err)
+	}
+
+	if cfg.Limits.ShutdownTimeout != 25*time.Second {
+		t.Fatalf("expected shutdown timeout 25s, got %s", cfg.Limits.ShutdownTimeout)
 	}
 }

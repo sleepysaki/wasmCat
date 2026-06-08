@@ -37,6 +37,7 @@ type WorkerOptions struct {
 	HeartbeatInterval  string
 	ExecutionTimeout   string
 	ModuleFetchTimeout string
+	ShutdownTimeout    string
 	MaxModuleBytes     int64
 	MaxPayloadBytes    int64
 	MaxOutputBytes     uint32
@@ -125,6 +126,7 @@ func InitWorker(options WorkerOptions) (Result, error) {
 		{"HEARTBEAT_INTERVAL", options.HeartbeatInterval},
 		{"EXECUTION_TIMEOUT", options.ExecutionTimeout},
 		{"MODULE_FETCH_TIMEOUT", options.ModuleFetchTimeout},
+		{"WORKER_SHUTDOWN_TIMEOUT", options.ShutdownTimeout},
 		{"MAX_MODULE_BYTES", strconv.FormatInt(options.MaxModuleBytes, 10)},
 		{"MAX_PAYLOAD_BYTES", strconv.FormatInt(options.MaxPayloadBytes, 10)},
 		{"MAX_OUTPUT_BYTES", strconv.FormatUint(uint64(options.MaxOutputBytes), 10)},
@@ -189,6 +191,9 @@ func normalizeWorker(options WorkerOptions) WorkerOptions {
 	if options.ModuleFetchTimeout == "" {
 		options.ModuleFetchTimeout = "10s"
 	}
+	if options.ShutdownTimeout == "" {
+		options.ShutdownTimeout = "10s"
+	}
 	if options.ModuleCacheTTL == "" {
 		options.ModuleCacheTTL = "30m"
 	}
@@ -252,6 +257,9 @@ func validateWorker(options WorkerOptions) error {
 	}
 	if _, err := time.ParseDuration(options.ModuleFetchTimeout); err != nil {
 		return fmt.Errorf("parse module fetch timeout: %w", err)
+	}
+	if _, err := time.ParseDuration(options.ShutdownTimeout); err != nil {
+		return fmt.Errorf("parse worker shutdown timeout: %w", err)
 	}
 	if _, err := time.ParseDuration(options.ModuleCacheTTL); err != nil {
 		return fmt.Errorf("parse module cache ttl: %w", err)

@@ -40,6 +40,7 @@ func main() {
 	engine := worker.NewWasmEngineWithLimits(ctx, worker.Limits{
 		ExecutionTimeout:   cfg.Limits.ExecutionTimeout,
 		ModuleFetchTimeout: cfg.Limits.ModuleFetchTimeout,
+		ShutdownTimeout:    cfg.Limits.ShutdownTimeout,
 		MaxModuleBytes:     cfg.Limits.MaxModuleBytes,
 		MaxPayloadBytes:    cfg.Limits.MaxPayloadBytes,
 		MaxOutputBytes:     cfg.Limits.MaxOutputBytes,
@@ -83,6 +84,7 @@ func runInit(args []string) error {
 	heartbeatInterval := flags.String("heartbeat-interval", "5s", "master heartbeat interval")
 	executionTimeout := flags.String("execution-timeout", "5s", "maximum execution duration")
 	moduleFetchTimeout := flags.String("module-fetch-timeout", "10s", "maximum module fetch duration")
+	shutdownTimeout := flags.String("worker-shutdown-timeout", "10s", "maximum graceful shutdown duration for in-flight worker requests")
 	maxModuleBytes := flags.Int64("max-module-bytes", 10<<20, "maximum downloaded module size")
 	maxPayloadBytes := flags.Int64("max-payload-bytes", 1<<20, "maximum request payload size")
 	maxOutputBytes := flags.Uint64("max-output-bytes", 1<<20, "maximum WASM output size")
@@ -111,6 +113,7 @@ func runInit(args []string) error {
 		HeartbeatInterval:  *heartbeatInterval,
 		ExecutionTimeout:   *executionTimeout,
 		ModuleFetchTimeout: *moduleFetchTimeout,
+		ShutdownTimeout:    *shutdownTimeout,
 		MaxModuleBytes:     *maxModuleBytes,
 		MaxPayloadBytes:    *maxPayloadBytes,
 		MaxOutputBytes:     uint32(*maxOutputBytes),

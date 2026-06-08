@@ -188,7 +188,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/worker/limits.go`
 
 - **Name & Responsibility:** Defines worker-side resource limits and normalizes partial limit structs.
-- **State & Properties:** `DefaultLimits` and `Limits`.
+- **State & Properties:** `DefaultLimits` and `Limits`, including execution, module fetch, graceful shutdown, size, concurrency, and cache lifecycle limits.
 - **Interactions:** Config loading and worker engine creation use these values.
 
 ### `internal/worker/telemetry.go`
@@ -248,7 +248,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Return Values:** `error` only.
 - **Error Handling:** Returns flag parse errors, `--max-output-bytes` overflow, and bootstrap validation/write errors.
 - **Side Effects:** Creates directories and `worker.env`.
-- **Flags:** `--config-dir`, `--cert-dir`, `--worker-id`, `--port`, `--master-url`, `--advertise-address`, `--heartbeat-interval`, `--execution-timeout`, `--module-fetch-timeout`, `--max-module-bytes`, `--max-payload-bytes`, `--max-output-bytes`, `--max-concurrent-execs`, `--force`.
+- **Flags:** `--config-dir`, `--cert-dir`, `--worker-id`, `--port`, `--master-url`, `--advertise-address`, `--heartbeat-interval`, `--execution-timeout`, `--module-fetch-timeout`, `--worker-shutdown-timeout`, `--max-module-bytes`, `--max-payload-bytes`, `--max-output-bytes`, `--max-concurrent-execs`, `--force`.
 
 ##### `func defaultConfigDir() string`
 
@@ -274,7 +274,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** `WorkerOptions`:
   - `ConfigDir`, `CertDir`, `WorkerID`, `Port`, `MasterURL`, `AdvertiseAddress`.
-  - Duration strings: `HeartbeatInterval`, `ExecutionTimeout`, `ModuleFetchTimeout`.
+  - Duration strings: `HeartbeatInterval`, `ExecutionTimeout`, `ModuleFetchTimeout`, `ShutdownTimeout`.
   - Numeric limits: `MaxModuleBytes`, `MaxPayloadBytes`, `MaxOutputBytes`, `MaxConcurrentExecs`.
   - `Force bool`.
 - **Return Values:** `Result` pointing at `worker.env` and cert dir.
@@ -350,7 +350,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** None.
 - **Return Values:** `Limits`.
-- **Error Handling:** Invalid `EXECUTION_TIMEOUT`, `MODULE_FETCH_TIMEOUT`, `MAX_MODULE_BYTES`, `MAX_PAYLOAD_BYTES`, `MAX_OUTPUT_BYTES`, `MAX_CONCURRENT_EXECS`, `MAX_CACHED_MODULES`, `MAX_CACHE_BYTES`, or `MODULE_CACHE_TTL`.
+- **Error Handling:** Invalid `EXECUTION_TIMEOUT`, `MODULE_FETCH_TIMEOUT`, `WORKER_SHUTDOWN_TIMEOUT`, `MAX_MODULE_BYTES`, `MAX_PAYLOAD_BYTES`, `MAX_OUTPUT_BYTES`, `MAX_CONCURRENT_EXECS`, `MAX_CACHED_MODULES`, `MAX_CACHE_BYTES`, or `MODULE_CACHE_TTL`.
 - **Side Effects:** Reads process environment.
 
 ##### `func stringEnv(name string, fallback string) string`
@@ -881,7 +881,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Parameters:** Shutdown context and port.
 - **Return Values:** Nil on clean shutdown.
 - **Error Handling:** CA/cert load failures, TLS server errors, shutdown errors.
-- **Side Effects:** Starts timeout-bounded HTTPS server requiring client certificates.
+- **Side Effects:** Starts timeout-bounded HTTPS server requiring client certificates; on cancellation, uses `Limits.ShutdownTimeout` as the graceful shutdown window.
 
 ##### `func NewWasmEngine(ctx context.Context) *WasmEngine`
 
@@ -963,7 +963,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func normalizeLimits(limits Limits) Limits`
 
 - **Parameters:** Possibly partial limits.
-- **Return Values:** Limits with defaults filled for non-positive values.
+- **Return Values:** Limits with defaults filled for non-positive values. Missing shutdown timeout defaults to execution timeout plus 5 seconds.
 - **Error Handling:** None.
 - **Side Effects:** None.
 
@@ -1049,6 +1049,7 @@ The core responsibility is to execute WASM modules on registered workers without
 | `HEARTBEAT_INTERVAL` | `5s` | Go duration | Interval for worker registration and heartbeat loop. |
 | `EXECUTION_TIMEOUT` | `5s` | Go duration | Full worker execution path timeout. |
 | `MODULE_FETCH_TIMEOUT` | `10s` | Go duration | Module download/compile timeout. |
+| `WORKER_SHUTDOWN_TIMEOUT` | `10s` | Go duration | Graceful shutdown window for in-flight worker HTTP requests. If unset, defaults to `EXECUTION_TIMEOUT + 5s`. |
 | `MAX_MODULE_BYTES` | `10485760` | integer bytes | Maximum downloaded WASM module size. |
 | `MAX_PAYLOAD_BYTES` | `1048576` | integer bytes | Maximum payload size before execution. |
 | `MAX_OUTPUT_BYTES` | `1048576` | uint32 bytes | Maximum output bytes read from WASM memory. |
@@ -1163,6 +1164,7 @@ output_len = uint32(result)
 - **HTTP servers are bounded:** Master and worker servers set read-header, read, write, and idle timeouts through the shared server factory.
 - **HTTP retries are bounded:** Safe outbound paths retry transient statuses and transport errors up to 3 attempts. Worker `/invoke` dispatch is not retried because it can execute user code.
 - **Master request bodies are bounded:** Internal worker control messages are capped at 4 KiB. `/api/v1/execute` uses `MAX_EXECUTION_REQUEST_BYTES`.
+- **Worker shutdown is bounded:** Worker HTTP shutdown uses `WORKER_SHUTDOWN_TIMEOUT`; requests still remain constrained by `EXECUTION_TIMEOUT`.
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
 - **Cold fetch coalescing is process-local:** Concurrent cold requests for the same cache key share one download/compile inside a worker process. Separate workers still compile independently.

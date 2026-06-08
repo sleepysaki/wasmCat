@@ -184,8 +184,9 @@ func (s *WorkerServer) Start(ctx context.Context, port string) error {
 		}
 		return err
 	case <-ctx.Done():
-		slog.Info("worker server shutdown requested", "worker_id", s.NodeID)
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownTimeout := s.shutdownTimeout()
+		slog.Info("worker server shutdown requested", "worker_id", s.NodeID, "shutdown_timeout", shutdownTimeout.String())
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown worker server: %w", err)
@@ -196,4 +197,12 @@ func (s *WorkerServer) Start(ctx context.Context, port string) error {
 		slog.Info("worker server stopped", "worker_id", s.NodeID)
 		return nil
 	}
+}
+
+func (s *WorkerServer) shutdownTimeout() time.Duration {
+	if s.Engine == nil {
+		return DefaultLimits.ShutdownTimeout
+	}
+
+	return s.Engine.Limits().ShutdownTimeout
 }

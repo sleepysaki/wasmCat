@@ -22,6 +22,8 @@ Both servers still require mTLS at the TLS configuration layer. Server timeouts 
 
 Request-specific contexts still control downstream work such as worker execution, module fetches, ACR resolution, and dispatch. Server timeouts only bound the HTTP connection lifecycle.
 
+Worker graceful shutdown is separate from per-connection timeouts. `WORKER_SHUTDOWN_TIMEOUT` controls how long the worker waits for in-flight HTTP requests during shutdown; execution itself is still capped by `EXECUTION_TIMEOUT`.
+
 Master request body size limits are separate:
 
 - internal worker control endpoints are capped at 4 KiB;
