@@ -6,6 +6,7 @@ Module cache behavior is documented in [MODULE_CACHE_LIFECYCLE.md](MODULE_CACHE_
 Execution client authorization is documented in [EXECUTION_AUTHORIZATION.md](EXECUTION_AUTHORIZATION.md).
 
 All duration values use Go duration syntax, such as `5s`, `30s`, or `30m`, and must be greater than zero.
+Byte and count limits must be greater than zero. CPU scheduling thresholds must be between `0` and `100`; RAM thresholds must be zero or greater.
 
 ## Master
 

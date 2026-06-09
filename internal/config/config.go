@@ -68,11 +68,17 @@ func LoadMaster() (MasterConfig, error) {
 	if err != nil {
 		return MasterConfig{}, err
 	}
+	if minWorkerCPUFree < 0 || minWorkerCPUFree > 100 {
+		return MasterConfig{}, fmt.Errorf("MIN_WORKER_CPU_FREE must be between 0 and 100")
+	}
 	minWorkerRAMFreeMB, err := float64Env("MIN_WORKER_RAM_FREE_MB", 0)
 	if err != nil {
 		return MasterConfig{}, err
 	}
-	maxExecuteBodyBytes, err := int64Env("MAX_EXECUTION_REQUEST_BYTES", 2<<20)
+	if minWorkerRAMFreeMB < 0 {
+		return MasterConfig{}, fmt.Errorf("MIN_WORKER_RAM_FREE_MB must be greater than or equal to zero")
+	}
+	maxExecuteBodyBytes, err := positiveInt64Env("MAX_EXECUTION_REQUEST_BYTES", 2<<20)
 	if err != nil {
 		return MasterConfig{}, err
 	}
@@ -181,27 +187,27 @@ func loadWorkerLimits() (Limits, error) {
 	if err != nil {
 		return Limits{}, err
 	}
-	maxModuleBytes, err := int64Env("MAX_MODULE_BYTES", defaults.MaxModuleBytes)
+	maxModuleBytes, err := positiveInt64Env("MAX_MODULE_BYTES", defaults.MaxModuleBytes)
 	if err != nil {
 		return Limits{}, err
 	}
-	maxPayloadBytes, err := int64Env("MAX_PAYLOAD_BYTES", defaults.MaxPayloadBytes)
+	maxPayloadBytes, err := positiveInt64Env("MAX_PAYLOAD_BYTES", defaults.MaxPayloadBytes)
 	if err != nil {
 		return Limits{}, err
 	}
-	maxOutputBytes, err := uint32Env("MAX_OUTPUT_BYTES", defaults.MaxOutputBytes)
+	maxOutputBytes, err := positiveUint32Env("MAX_OUTPUT_BYTES", defaults.MaxOutputBytes)
 	if err != nil {
 		return Limits{}, err
 	}
-	maxConcurrentExecs, err := intEnv("MAX_CONCURRENT_EXECS", defaults.MaxConcurrentExecs)
+	maxConcurrentExecs, err := positiveIntEnv("MAX_CONCURRENT_EXECS", defaults.MaxConcurrentExecs)
 	if err != nil {
 		return Limits{}, err
 	}
-	maxCachedModules, err := intEnv("MAX_CACHED_MODULES", defaults.MaxCachedModules)
+	maxCachedModules, err := positiveIntEnv("MAX_CACHED_MODULES", defaults.MaxCachedModules)
 	if err != nil {
 		return Limits{}, err
 	}
-	maxCacheBytes, err := int64Env("MAX_CACHE_BYTES", defaults.MaxCacheBytes)
+	maxCacheBytes, err := positiveInt64Env("MAX_CACHE_BYTES", defaults.MaxCacheBytes)
 	if err != nil {
 		return Limits{}, err
 	}
@@ -286,6 +292,18 @@ func intEnv(name string, fallback int) (int, error) {
 	return parsed, nil
 }
 
+func positiveIntEnv(name string, fallback int) (int, error) {
+	parsed, err := intEnv(name, fallback)
+	if err != nil {
+		return 0, err
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", name)
+	}
+
+	return parsed, nil
+}
+
 func int64Env(name string, fallback int64) (int64, error) {
 	value := os.Getenv(name)
 	if value == "" {
@@ -295,6 +313,18 @@ func int64Env(name string, fallback int64) (int64, error) {
 	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("parse %s integer: %w", name, err)
+	}
+
+	return parsed, nil
+}
+
+func positiveInt64Env(name string, fallback int64) (int64, error) {
+	parsed, err := int64Env(name, fallback)
+	if err != nil {
+		return 0, err
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", name)
 	}
 
 	return parsed, nil
@@ -326,4 +356,16 @@ func uint32Env(name string, fallback uint32) (uint32, error) {
 	}
 
 	return uint32(parsed), nil
+}
+
+func positiveUint32Env(name string, fallback uint32) (uint32, error) {
+	parsed, err := uint32Env(name, fallback)
+	if err != nil {
+		return 0, err
+	}
+	if parsed == 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", name)
+	}
+
+	return parsed, nil
 }

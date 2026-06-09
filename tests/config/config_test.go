@@ -177,6 +177,38 @@ func TestLoadMasterRejectsInvalidAutoGenerateCerts(t *testing.T) {
 	}
 }
 
+func TestLoadMasterRejectsInvalidCapacityThresholds(t *testing.T) {
+	tests := []struct {
+		name  string
+		env   string
+		value string
+	}{
+		{name: "negative cpu", env: "MIN_WORKER_CPU_FREE", value: "-1"},
+		{name: "cpu over one hundred", env: "MIN_WORKER_CPU_FREE", value: "101"},
+		{name: "negative ram", env: "MIN_WORKER_RAM_FREE_MB", value: "-1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tt.env, tt.value)
+
+			_, err := config.LoadMaster()
+			if err == nil {
+				t.Fatalf("expected invalid %s error", tt.env)
+			}
+		})
+	}
+}
+
+func TestLoadMasterRejectsNonPositiveExecutionBodyLimit(t *testing.T) {
+	t.Setenv("MAX_EXECUTION_REQUEST_BYTES", "0")
+
+	_, err := config.LoadMaster()
+	if err == nil {
+		t.Fatal("expected non-positive max execution request bytes error")
+	}
+}
+
 func TestLoadWorkerRejectsInvalidCoordinates(t *testing.T) {
 	t.Setenv("WORKER_LATITUDE", "north")
 
@@ -201,6 +233,31 @@ func TestLoadWorkerRejectsNonPositiveLimitDuration(t *testing.T) {
 	_, err := config.LoadWorker()
 	if err == nil {
 		t.Fatal("expected non-positive worker limit duration error")
+	}
+}
+
+func TestLoadWorkerRejectsNonPositiveNumericLimits(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+	}{
+		{name: "module bytes", env: "MAX_MODULE_BYTES"},
+		{name: "payload bytes", env: "MAX_PAYLOAD_BYTES"},
+		{name: "output bytes", env: "MAX_OUTPUT_BYTES"},
+		{name: "concurrent execs", env: "MAX_CONCURRENT_EXECS"},
+		{name: "cached modules", env: "MAX_CACHED_MODULES"},
+		{name: "cache bytes", env: "MAX_CACHE_BYTES"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tt.env, "0")
+
+			_, err := config.LoadWorker()
+			if err == nil {
+				t.Fatalf("expected non-positive %s error", tt.env)
+			}
+		})
 	}
 }
 

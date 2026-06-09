@@ -172,7 +172,7 @@ func normalizeMaster(options MasterOptions) MasterOptions {
 	if options.CertDir == "" && options.ConfigDir != "" {
 		options.CertDir = filepath.Join(options.ConfigDir, "certs")
 	}
-	if options.MaxExecuteBodyBytes <= 0 {
+	if options.MaxExecuteBodyBytes == 0 {
 		options.MaxExecuteBodyBytes = 2 << 20
 	}
 
@@ -235,6 +235,15 @@ func validateMaster(options MasterOptions) error {
 	}
 	if err := validatePositiveDuration("master shutdown timeout", options.ShutdownTimeout); err != nil {
 		return fmt.Errorf("parse master shutdown timeout: %w", err)
+	}
+	if options.MinWorkerCPUFree < 0 || options.MinWorkerCPUFree > 100 {
+		return fmt.Errorf("min worker cpu free must be between 0 and 100")
+	}
+	if options.MinWorkerRAMFreeMB < 0 {
+		return fmt.Errorf("min worker ram free mb must be greater than or equal to zero")
+	}
+	if options.MaxExecuteBodyBytes <= 0 {
+		return fmt.Errorf("max execution request bytes must be greater than zero")
 	}
 
 	return nil

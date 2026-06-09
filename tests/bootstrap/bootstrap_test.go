@@ -83,6 +83,50 @@ func TestInitMasterRejectsNonPositiveDurations(t *testing.T) {
 	}
 }
 
+func TestInitMasterRejectsInvalidCapacityThresholds(t *testing.T) {
+	tests := []struct {
+		name    string
+		options bootstrap.MasterOptions
+	}{
+		{
+			name: "negative cpu",
+			options: bootstrap.MasterOptions{
+				MinWorkerCPUFree: -1,
+			},
+		},
+		{
+			name: "cpu over one hundred",
+			options: bootstrap.MasterOptions{
+				MinWorkerCPUFree: 101,
+			},
+		},
+		{
+			name: "negative ram",
+			options: bootstrap.MasterOptions{
+				MinWorkerRAMFreeMB: -1,
+			},
+		},
+		{
+			name: "negative request body limit",
+			options: bootstrap.MasterOptions{
+				MaxExecuteBodyBytes: -1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.options.ConfigDir = "config"
+			tt.options.CertDir = "certs"
+
+			_, err := bootstrap.InitMaster(tt.options)
+			if err == nil {
+				t.Fatal("expected invalid master capacity/body limit error")
+			}
+		})
+	}
+}
+
 func TestInitMasterGeneratesDevelopmentCerts(t *testing.T) {
 	configDir := t.TempDir()
 	certDir := filepath.Join(configDir, "certs")
