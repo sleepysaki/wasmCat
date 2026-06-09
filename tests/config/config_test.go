@@ -105,11 +105,21 @@ func TestLoadMasterRejectsInvalidWorkerStaleTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadMasterRejectsInvalidMasterShutdownTimeout(t *testing.T) {
+	t.Setenv("MASTER_SHUTDOWN_TIMEOUT", "not-a-duration")
+
+	_, err := config.LoadMaster()
+	if err == nil {
+		t.Fatal("expected invalid master shutdown timeout error")
+	}
+}
+
 func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	t.Setenv("CERT_DIR", "/etc/wasmcat/certs")
 	t.Setenv("AUTO_GENERATE_CERTS", "false")
 	t.Setenv("DEV_WORKER_ID", "worker-prod-01")
 	t.Setenv("WORKER_STALE_TIMEOUT", "45s")
+	t.Setenv("MASTER_SHUTDOWN_TIMEOUT", "8s")
 	t.Setenv("MIN_WORKER_CPU_FREE", "15.5")
 	t.Setenv("MIN_WORKER_RAM_FREE_MB", "512")
 	t.Setenv("EXECUTE_CLIENT_ALLOWLIST", "wasmcat-client, deployer.internal ")
@@ -131,6 +141,9 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	}
 	if cfg.WorkerStaleTimeout != 45*time.Second {
 		t.Fatalf("expected worker stale timeout 45s, got %s", cfg.WorkerStaleTimeout)
+	}
+	if cfg.ShutdownTimeout != 8*time.Second {
+		t.Fatalf("expected master shutdown timeout 8s, got %s", cfg.ShutdownTimeout)
 	}
 	if cfg.MinWorkerCPUFree != 15.5 {
 		t.Fatalf("expected min CPU 15.5, got %f", cfg.MinWorkerCPUFree)

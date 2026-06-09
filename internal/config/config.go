@@ -28,6 +28,7 @@ type MasterConfig struct {
 	WorkerIDForCert     string
 	CleanupInterval     time.Duration
 	WorkerStaleTimeout  time.Duration
+	ShutdownTimeout     time.Duration
 	MinWorkerCPUFree    float64
 	MinWorkerRAMFreeMB  float64
 	ExecuteClientIDs    []string
@@ -55,6 +56,10 @@ func LoadMaster() (MasterConfig, error) {
 	if err != nil {
 		return MasterConfig{}, err
 	}
+	shutdownTimeout, err := durationEnv("MASTER_SHUTDOWN_TIMEOUT", 5*time.Second)
+	if err != nil {
+		return MasterConfig{}, err
+	}
 	autoGenerateCerts, err := boolEnv("AUTO_GENERATE_CERTS", true)
 	if err != nil {
 		return MasterConfig{}, err
@@ -79,6 +84,7 @@ func LoadMaster() (MasterConfig, error) {
 		WorkerIDForCert:     stringEnv("DEV_WORKER_ID", "worker-vn-01"),
 		CleanupInterval:     cleanupInterval,
 		WorkerStaleTimeout:  workerStaleTimeout,
+		ShutdownTimeout:     shutdownTimeout,
 		MinWorkerCPUFree:    minWorkerCPUFree,
 		MinWorkerRAMFreeMB:  minWorkerRAMFreeMB,
 		ExecuteClientIDs:    listEnv("EXECUTE_CLIENT_ALLOWLIST"),

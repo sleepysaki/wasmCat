@@ -19,6 +19,7 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 		Port:                "9443",
 		CleanupInterval:     "30s",
 		WorkerStaleTimeout:  "90s",
+		ShutdownTimeout:     "12s",
 		MinWorkerCPUFree:    10,
 		MinWorkerRAMFreeMB:  256,
 		ExecuteClientIDs:    "wasmcat-client,deployer.internal",
@@ -43,6 +44,7 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 	assertContains(t, env, "DEV_WORKER_ID=worker-test-01\n")
 	assertContains(t, env, "CLEANUP_INTERVAL=30s\n")
 	assertContains(t, env, "WORKER_STALE_TIMEOUT=90s\n")
+	assertContains(t, env, "MASTER_SHUTDOWN_TIMEOUT=12s\n")
 	assertContains(t, env, "MIN_WORKER_CPU_FREE=10\n")
 	assertContains(t, env, "MIN_WORKER_RAM_FREE_MB=256\n")
 	assertContains(t, env, "EXECUTE_CLIENT_ALLOWLIST=wasmcat-client,deployer.internal\n")

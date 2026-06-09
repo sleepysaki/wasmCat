@@ -134,7 +134,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/master/gateway.go`
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
-- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, and optional `Gateway.ExecuteClientIDs`.
+- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, optional `Gateway.ExecuteClientIDs`, request body limit, and graceful shutdown timeout.
 - **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain, validates execution client certificate identity when configured, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
 
 ### `internal/master/registry.go`
@@ -224,7 +224,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Return Values:** `error` only. Nil means config/cert directories and `master.env` were created successfully.
 - **Error Handling:** Returns flag parse errors and bootstrap validation/write errors.
 - **Side Effects:** Writes status lines to stdout through caller, creates directories/files through `bootstrap.InitMaster`.
-- **Flags:** `--config-dir`, `--cert-dir`, `--port`, `--cleanup-interval`, `--worker-stale-timeout`, `--dev-worker-id`, `--dev-certs`, `--force`.
+- **Flags:** `--config-dir`, `--cert-dir`, `--port`, `--cleanup-interval`, `--worker-stale-timeout`, `--master-shutdown-timeout`, `--dev-worker-id`, `--dev-certs`, `--force`.
 
 ##### `func defaultConfigDir() string`
 
@@ -264,6 +264,7 @@ The core responsibility is to execute WASM modules on registered workers without
   - `Port string`: master HTTPS port. Defaults to `7270`.
   - `CleanupInterval string`: duration string for registry cleanup ticker. Defaults to `15s`.
   - `WorkerStaleTimeout string`: duration string for how long a worker may miss heartbeats before cleanup removes it. Defaults to `30s`.
+  - `ShutdownTimeout string`: duration string for graceful master HTTP shutdown. Defaults to `5s`.
   - `DevWorkerID string`: worker ID used when generating local dev certs. Defaults to `worker-vn-01`.
   - `GenerateDevCerts bool`: when true, writes local CA/master/worker certs.
   - `Force bool`: allows overwriting existing env or generated dev cert files.
@@ -300,7 +301,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** Normalized master options.
 - **Return Values:** Nil on valid input.
-- **Error Handling:** Missing config dir, cert dir, port, dev worker ID, invalid cleanup interval, or invalid worker stale timeout.
+- **Error Handling:** Missing config dir, cert dir, port, dev worker ID, invalid cleanup interval, invalid worker stale timeout, or invalid master shutdown timeout.
 - **Side Effects:** None.
 
 ##### `func validateWorker(options WorkerOptions) error`
@@ -336,8 +337,8 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func LoadMaster() (MasterConfig, error)`
 
 - **Parameters:** None.
-- **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `WorkerStaleTimeout`, `MinWorkerCPUFree`, and `MinWorkerRAMFreeMB`.
-- **Error Handling:** Invalid `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `AUTO_GENERATE_CERTS`, `MIN_WORKER_CPU_FREE`, or `MIN_WORKER_RAM_FREE_MB`.
+- **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `WorkerStaleTimeout`, `ShutdownTimeout`, `MinWorkerCPUFree`, and `MinWorkerRAMFreeMB`.
+- **Error Handling:** Invalid `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, `AUTO_GENERATE_CERTS`, `MIN_WORKER_CPU_FREE`, or `MIN_WORKER_RAM_FREE_MB`.
 - **Side Effects:** Reads process environment.
 
 ##### `func LoadWorker() (WorkerConfig, error)`
@@ -626,7 +627,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Parameters:** Shutdown context and listen port string.
 - **Return Values:** Nil on clean shutdown.
 - **Error Handling:** CA/cert read errors, TLS server errors, shutdown errors.
-- **Side Effects:** Starts timeout-bounded HTTPS server requiring client certificates.
+- **Side Effects:** Starts timeout-bounded HTTPS server requiring client certificates; on cancellation, uses `Gateway.ShutdownTimeout` or `DefaultMasterShutdownTimeout` as the graceful shutdown window.
 
 ##### `func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request)`
 
@@ -1049,6 +1050,7 @@ The core responsibility is to execute WASM modules on registered workers without
 | `DEV_WORKER_ID` | `worker-vn-01` | string | Worker ID used for local dev cert generation. |
 | `CLEANUP_INTERVAL` | `15s` | Go duration | Frequency for registry cleanup scans. |
 | `WORKER_STALE_TIMEOUT` | `30s` | Go duration | Maximum time since a worker heartbeat before cleanup removes that registry entry. |
+| `MASTER_SHUTDOWN_TIMEOUT` | `5s` | Go duration | Graceful shutdown window for in-flight master HTTP requests. |
 | `MIN_WORKER_CPU_FREE` | `0` | float percentage | Minimum reported free CPU required before the scheduler can select a worker. |
 | `MIN_WORKER_RAM_FREE_MB` | `0` | float MiB | Minimum reported free RAM required before the scheduler can select a worker. |
 | `EXECUTE_CLIENT_ALLOWLIST` | empty | comma-separated certificate identities | Optional client certificate CN or DNS SAN allowlist for `/api/v1/execute`. Empty allows any trusted mTLS client. |
@@ -1088,6 +1090,7 @@ wasmcat-master init \
   --port 7270 \
   --cleanup-interval 15s \
   --worker-stale-timeout 30s \
+  --master-shutdown-timeout 5s \
   --dev-worker-id worker-vn-01
 ```
 
@@ -1184,6 +1187,7 @@ output_len = uint32(result)
 - **HTTP servers are bounded:** Master and worker servers set read-header, read, write, and idle timeouts through the shared server factory.
 - **HTTP retries are bounded:** Safe outbound paths retry transient statuses and transport errors up to 3 attempts. Worker `/invoke` dispatch is not retried because it can execute user code.
 - **Master request bodies are bounded:** Internal worker control messages are capped at 4 KiB. `/api/v1/execute` uses `MAX_EXECUTION_REQUEST_BYTES`.
+- **Master shutdown is bounded:** Master HTTP shutdown uses `MASTER_SHUTDOWN_TIMEOUT`, so stop/restart does not wait forever on in-flight requests.
 - **Worker shutdown is bounded:** Worker HTTP shutdown uses `WORKER_SHUTDOWN_TIMEOUT`; requests still remain constrained by `EXECUTION_TIMEOUT`.
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.

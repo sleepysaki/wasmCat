@@ -17,6 +17,7 @@ type MasterOptions struct {
 	Port                string
 	CleanupInterval     string
 	WorkerStaleTimeout  string
+	ShutdownTimeout     string
 	MinWorkerCPUFree    float64
 	MinWorkerRAMFreeMB  float64
 	ExecuteClientIDs    string
@@ -85,6 +86,7 @@ func InitMaster(options MasterOptions) (Result, error) {
 		{"DEV_WORKER_ID", options.DevWorkerID},
 		{"CLEANUP_INTERVAL", options.CleanupInterval},
 		{"WORKER_STALE_TIMEOUT", options.WorkerStaleTimeout},
+		{"MASTER_SHUTDOWN_TIMEOUT", options.ShutdownTimeout},
 		{"MIN_WORKER_CPU_FREE", strconv.FormatFloat(options.MinWorkerCPUFree, 'f', -1, 64)},
 		{"MIN_WORKER_RAM_FREE_MB", strconv.FormatFloat(options.MinWorkerRAMFreeMB, 'f', -1, 64)},
 		{"EXECUTE_CLIENT_ALLOWLIST", options.ExecuteClientIDs},
@@ -161,6 +163,9 @@ func normalizeMaster(options MasterOptions) MasterOptions {
 	if options.WorkerStaleTimeout == "" {
 		options.WorkerStaleTimeout = "30s"
 	}
+	if options.ShutdownTimeout == "" {
+		options.ShutdownTimeout = "5s"
+	}
 	if options.DevWorkerID == "" {
 		options.DevWorkerID = "worker-vn-01"
 	}
@@ -227,6 +232,9 @@ func validateMaster(options MasterOptions) error {
 	}
 	if _, err := time.ParseDuration(options.WorkerStaleTimeout); err != nil {
 		return fmt.Errorf("parse worker stale timeout: %w", err)
+	}
+	if _, err := time.ParseDuration(options.ShutdownTimeout); err != nil {
+		return fmt.Errorf("parse master shutdown timeout: %w", err)
 	}
 
 	return nil

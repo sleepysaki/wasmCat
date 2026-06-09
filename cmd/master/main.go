@@ -67,6 +67,7 @@ func main() {
 		CertDir:             cfg.CertDir,
 		ExecuteClientIDs:    cfg.ExecuteClientIDs,
 		MaxExecuteBodyBytes: cfg.MaxExecuteBodyBytes,
+		ShutdownTimeout:     cfg.ShutdownTimeout,
 	}
 
 	// Background Processes
@@ -121,6 +122,7 @@ func runInit(args []string) error {
 	port := flags.String("port", "7270", "master HTTPS port")
 	cleanupInterval := flags.String("cleanup-interval", "15s", "registry cleanup interval")
 	workerStaleTimeout := flags.String("worker-stale-timeout", "30s", "how long a worker can miss heartbeats before registry cleanup removes it")
+	shutdownTimeout := flags.String("master-shutdown-timeout", "5s", "maximum graceful shutdown duration for in-flight master requests")
 	minWorkerCPUFree := flags.Float64("min-worker-cpu-free", 0, "minimum free CPU percent required for scheduling")
 	minWorkerRAMFreeMB := flags.Float64("min-worker-ram-free-mb", 0, "minimum free RAM in MiB required for scheduling")
 	executeClientAllowlist := flags.String("execute-client-allowlist", "", "comma-separated client certificate CN or DNS SAN values allowed to call /api/v1/execute")
@@ -139,6 +141,7 @@ func runInit(args []string) error {
 		Port:                *port,
 		CleanupInterval:     *cleanupInterval,
 		WorkerStaleTimeout:  *workerStaleTimeout,
+		ShutdownTimeout:     *shutdownTimeout,
 		MinWorkerCPUFree:    *minWorkerCPUFree,
 		MinWorkerRAMFreeMB:  *minWorkerRAMFreeMB,
 		ExecuteClientIDs:    *executeClientAllowlist,

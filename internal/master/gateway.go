@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	defaultMaxExecuteBodyBytes  = 2 << 20
-	internalControlMaxBodyBytes = 4 << 10
+	defaultMaxExecuteBodyBytes   = 2 << 20
+	internalControlMaxBodyBytes  = 4 << 10
+	DefaultMasterShutdownTimeout = 5 * time.Second
 )
 
 // Web server for the Master node
@@ -36,6 +37,9 @@ type Gateway struct {
 	ExecuteClientIDs []string
 
 	MaxExecuteBodyBytes int64
+	// How long the master waits for active HTTP requests after SIGINT/SIGTERM.
+	// This protects shutdown from hanging forever while still giving in-flight requests a chance to finish.
+	ShutdownTimeout time.Duration
 }
 
 // Constructor
@@ -234,8 +238,9 @@ func (g *Gateway) Start(ctx context.Context, port string) error {
 		}
 		return err
 	case <-ctx.Done():
-		slog.Info("master gateway shutdown requested")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownTimeout := g.shutdownTimeout()
+		slog.Info("master gateway shutdown requested", "shutdown_timeout", shutdownTimeout.String())
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown master gateway: %w", err)
@@ -246,6 +251,14 @@ func (g *Gateway) Start(ctx context.Context, port string) error {
 		slog.Info("master gateway stopped")
 		return nil
 	}
+}
+
+func (g *Gateway) shutdownTimeout() time.Duration {
+	if g.ShutdownTimeout <= 0 {
+		return DefaultMasterShutdownTimeout
+	}
+
+	return g.ShutdownTimeout
 }
 
 func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {

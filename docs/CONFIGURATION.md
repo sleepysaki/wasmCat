@@ -15,6 +15,7 @@ Execution client authorization is documented in [EXECUTION_AUTHORIZATION.md](EXE
 | `DEV_WORKER_ID` | `worker-vn-01` | Worker ID used by local dev certificate generation. |
 | `CLEANUP_INTERVAL` | `15s` | How often the master scans the registry for stale workers. |
 | `WORKER_STALE_TIMEOUT` | `30s` | How long a worker may go without heartbeat updates before cleanup removes it. |
+| `MASTER_SHUTDOWN_TIMEOUT` | `5s` | Max graceful shutdown time for in-flight master HTTP requests. |
 | `MIN_WORKER_CPU_FREE` | `0` | Minimum free CPU percentage required for a worker to receive new work. |
 | `MIN_WORKER_RAM_FREE_MB` | `0` | Minimum free RAM in MiB required for a worker to receive new work. |
 | `EXECUTE_CLIENT_ALLOWLIST` | empty | Comma-separated client certificate CN or DNS SAN values allowed to call `/api/v1/execute`. Empty means any trusted mTLS client can execute work. |

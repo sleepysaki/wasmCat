@@ -115,6 +115,7 @@ sudo wasmcat-master init \
   --config-dir /etc/wasmcat \
   --cert-dir /etc/wasmcat/certs \
   --worker-stale-timeout 30s \
+  --master-shutdown-timeout 5s \
   --min-worker-cpu-free 10 \
   --min-worker-ram-free-mb 256
 ```
@@ -134,6 +135,7 @@ CERT_DIR=/etc/wasmcat/certs
 MASTER_PORT=7270
 CLEANUP_INTERVAL=15s
 WORKER_STALE_TIMEOUT=30s
+MASTER_SHUTDOWN_TIMEOUT=5s
 MIN_WORKER_CPU_FREE=10
 MIN_WORKER_RAM_FREE_MB=256
 EXECUTE_CLIENT_ALLOWLIST=
