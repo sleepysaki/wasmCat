@@ -48,15 +48,15 @@ type WorkerConfig struct {
 }
 
 func LoadMaster() (MasterConfig, error) {
-	cleanupInterval, err := durationEnv("CLEANUP_INTERVAL", 15*time.Second)
+	cleanupInterval, err := positiveDurationEnv("CLEANUP_INTERVAL", 15*time.Second)
 	if err != nil {
 		return MasterConfig{}, err
 	}
-	workerStaleTimeout, err := durationEnv("WORKER_STALE_TIMEOUT", 30*time.Second)
+	workerStaleTimeout, err := positiveDurationEnv("WORKER_STALE_TIMEOUT", 30*time.Second)
 	if err != nil {
 		return MasterConfig{}, err
 	}
-	shutdownTimeout, err := durationEnv("MASTER_SHUTDOWN_TIMEOUT", 5*time.Second)
+	shutdownTimeout, err := positiveDurationEnv("MASTER_SHUTDOWN_TIMEOUT", 5*time.Second)
 	if err != nil {
 		return MasterConfig{}, err
 	}
@@ -113,7 +113,7 @@ func listEnv(name string) []string {
 }
 
 func LoadWorker() (WorkerConfig, error) {
-	heartbeatInterval, err := durationEnv("HEARTBEAT_INTERVAL", 5*time.Second)
+	heartbeatInterval, err := positiveDurationEnv("HEARTBEAT_INTERVAL", 5*time.Second)
 	if err != nil {
 		return WorkerConfig{}, err
 	}
@@ -169,15 +169,15 @@ func loadWorkerLimits() (Limits, error) {
 		ModuleCacheTTL:     30 * time.Minute,
 	}
 
-	executionTimeout, err := durationEnv("EXECUTION_TIMEOUT", defaults.ExecutionTimeout)
+	executionTimeout, err := positiveDurationEnv("EXECUTION_TIMEOUT", defaults.ExecutionTimeout)
 	if err != nil {
 		return Limits{}, err
 	}
-	moduleFetchTimeout, err := durationEnv("MODULE_FETCH_TIMEOUT", defaults.ModuleFetchTimeout)
+	moduleFetchTimeout, err := positiveDurationEnv("MODULE_FETCH_TIMEOUT", defaults.ModuleFetchTimeout)
 	if err != nil {
 		return Limits{}, err
 	}
-	shutdownTimeout, err := durationEnv("WORKER_SHUTDOWN_TIMEOUT", executionTimeout+5*time.Second)
+	shutdownTimeout, err := positiveDurationEnv("WORKER_SHUTDOWN_TIMEOUT", executionTimeout+5*time.Second)
 	if err != nil {
 		return Limits{}, err
 	}
@@ -205,7 +205,7 @@ func loadWorkerLimits() (Limits, error) {
 	if err != nil {
 		return Limits{}, err
 	}
-	moduleCacheTTL, err := durationEnv("MODULE_CACHE_TTL", defaults.ModuleCacheTTL)
+	moduleCacheTTL, err := positiveDurationEnv("MODULE_CACHE_TTL", defaults.ModuleCacheTTL)
 	if err != nil {
 		return Limits{}, err
 	}
@@ -241,6 +241,18 @@ func durationEnv(name string, fallback time.Duration) (time.Duration, error) {
 	parsed, err := time.ParseDuration(value)
 	if err != nil {
 		return 0, fmt.Errorf("parse %s duration: %w", name, err)
+	}
+
+	return parsed, nil
+}
+
+func positiveDurationEnv(name string, fallback time.Duration) (time.Duration, error) {
+	parsed, err := durationEnv(name, fallback)
+	if err != nil {
+		return 0, err
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", name)
 	}
 
 	return parsed, nil

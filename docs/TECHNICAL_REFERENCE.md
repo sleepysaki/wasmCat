@@ -301,14 +301,14 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** Normalized master options.
 - **Return Values:** Nil on valid input.
-- **Error Handling:** Missing config dir, cert dir, port, dev worker ID, invalid cleanup interval, invalid worker stale timeout, or invalid master shutdown timeout.
+- **Error Handling:** Missing config dir, cert dir, port, dev worker ID, invalid or non-positive cleanup interval, worker stale timeout, or master shutdown timeout.
 - **Side Effects:** None.
 
 ##### `func validateWorker(options WorkerOptions) error`
 
 - **Parameters:** Normalized worker options.
 - **Return Values:** Nil on valid input.
-- **Error Handling:** Missing required strings, non-HTTPS master URL, invalid duration strings, non-positive numeric limits.
+- **Error Handling:** Missing required strings, non-HTTPS master URL, invalid or non-positive duration strings, non-positive numeric limits.
 - **Side Effects:** None.
 
 ##### `func validateURL(value string) error`
@@ -338,7 +338,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** None.
 - **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `WorkerStaleTimeout`, `ShutdownTimeout`, `MinWorkerCPUFree`, and `MinWorkerRAMFreeMB`.
-- **Error Handling:** Invalid `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, `AUTO_GENERATE_CERTS`, `MIN_WORKER_CPU_FREE`, or `MIN_WORKER_RAM_FREE_MB`.
+- **Error Handling:** Invalid or non-positive `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, or `MASTER_SHUTDOWN_TIMEOUT`; invalid `AUTO_GENERATE_CERTS`, `MIN_WORKER_CPU_FREE`, or `MIN_WORKER_RAM_FREE_MB`.
 - **Side Effects:** Reads process environment.
 
 ##### `func LoadWorker() (WorkerConfig, error)`
@@ -352,7 +352,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** None.
 - **Return Values:** `Limits`.
-- **Error Handling:** Invalid `EXECUTION_TIMEOUT`, `MODULE_FETCH_TIMEOUT`, `WORKER_SHUTDOWN_TIMEOUT`, `MAX_MODULE_BYTES`, `MAX_PAYLOAD_BYTES`, `MAX_OUTPUT_BYTES`, `MAX_CONCURRENT_EXECS`, `MAX_CACHED_MODULES`, `MAX_CACHE_BYTES`, or `MODULE_CACHE_TTL`.
+- **Error Handling:** Invalid or non-positive `HEARTBEAT_INTERVAL`, `EXECUTION_TIMEOUT`, `MODULE_FETCH_TIMEOUT`, `WORKER_SHUTDOWN_TIMEOUT`, or `MODULE_CACHE_TTL`; invalid numeric limits, payload/output/cache limits, or coordinates.
 - **Side Effects:** Reads process environment.
 
 ##### `func stringEnv(name string, fallback string) string`

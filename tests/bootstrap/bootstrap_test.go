@@ -72,6 +72,17 @@ func TestInitMasterRefusesToOverwriteEnvWithoutForce(t *testing.T) {
 	}
 }
 
+func TestInitMasterRejectsNonPositiveDurations(t *testing.T) {
+	_, err := bootstrap.InitMaster(bootstrap.MasterOptions{
+		ConfigDir:       "config",
+		CertDir:         "certs",
+		CleanupInterval: "0s",
+	})
+	if err == nil {
+		t.Fatal("expected non-positive cleanup interval error")
+	}
+}
+
 func TestInitMasterGeneratesDevelopmentCerts(t *testing.T) {
 	configDir := t.TempDir()
 	certDir := filepath.Join(configDir, "certs")
@@ -142,6 +153,26 @@ func TestInitWorkerRejectsInvalidMasterURL(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid master URL error")
+	}
+}
+
+func TestInitWorkerRejectsNonPositiveDurations(t *testing.T) {
+	_, err := bootstrap.InitWorker(bootstrap.WorkerOptions{
+		ConfigDir:          "config",
+		CertDir:            "certs",
+		WorkerID:           "worker-test",
+		MasterURL:          "https://master.example.com:7270",
+		AdvertiseAddress:   "worker.example.com:7271",
+		HeartbeatInterval:  "0s",
+		MaxModuleBytes:     10 << 20,
+		MaxPayloadBytes:    1 << 20,
+		MaxOutputBytes:     1 << 20,
+		MaxConcurrentExecs: 1,
+		MaxCachedModules:   1,
+		MaxCacheBytes:      1 << 20,
+	})
+	if err == nil {
+		t.Fatal("expected non-positive heartbeat interval error")
 	}
 }
 

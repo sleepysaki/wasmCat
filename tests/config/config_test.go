@@ -96,6 +96,15 @@ func TestLoadMasterRejectsInvalidDuration(t *testing.T) {
 	}
 }
 
+func TestLoadMasterRejectsNonPositiveDuration(t *testing.T) {
+	t.Setenv("CLEANUP_INTERVAL", "0s")
+
+	_, err := config.LoadMaster()
+	if err == nil {
+		t.Fatal("expected non-positive duration error")
+	}
+}
+
 func TestLoadMasterRejectsInvalidWorkerStaleTimeout(t *testing.T) {
 	t.Setenv("WORKER_STALE_TIMEOUT", "not-a-duration")
 
@@ -174,6 +183,24 @@ func TestLoadWorkerRejectsInvalidCoordinates(t *testing.T) {
 	_, err := config.LoadWorker()
 	if err == nil {
 		t.Fatal("expected invalid latitude error")
+	}
+}
+
+func TestLoadWorkerRejectsNonPositiveHeartbeatInterval(t *testing.T) {
+	t.Setenv("HEARTBEAT_INTERVAL", "0s")
+
+	_, err := config.LoadWorker()
+	if err == nil {
+		t.Fatal("expected non-positive heartbeat interval error")
+	}
+}
+
+func TestLoadWorkerRejectsNonPositiveLimitDuration(t *testing.T) {
+	t.Setenv("EXECUTION_TIMEOUT", "-1s")
+
+	_, err := config.LoadWorker()
+	if err == nil {
+		t.Fatal("expected non-positive worker limit duration error")
 	}
 }
 

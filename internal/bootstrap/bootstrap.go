@@ -227,13 +227,13 @@ func validateMaster(options MasterOptions) error {
 	if strings.TrimSpace(options.DevWorkerID) == "" {
 		return fmt.Errorf("dev worker id is required")
 	}
-	if _, err := time.ParseDuration(options.CleanupInterval); err != nil {
+	if err := validatePositiveDuration("cleanup interval", options.CleanupInterval); err != nil {
 		return fmt.Errorf("parse cleanup interval: %w", err)
 	}
-	if _, err := time.ParseDuration(options.WorkerStaleTimeout); err != nil {
+	if err := validatePositiveDuration("worker stale timeout", options.WorkerStaleTimeout); err != nil {
 		return fmt.Errorf("parse worker stale timeout: %w", err)
 	}
-	if _, err := time.ParseDuration(options.ShutdownTimeout); err != nil {
+	if err := validatePositiveDuration("master shutdown timeout", options.ShutdownTimeout); err != nil {
 		return fmt.Errorf("parse master shutdown timeout: %w", err)
 	}
 
@@ -265,19 +265,19 @@ func validateWorker(options WorkerOptions) error {
 	if options.Longitude < -180 || options.Longitude > 180 {
 		return fmt.Errorf("worker longitude must be between -180 and 180")
 	}
-	if _, err := time.ParseDuration(options.HeartbeatInterval); err != nil {
+	if err := validatePositiveDuration("heartbeat interval", options.HeartbeatInterval); err != nil {
 		return fmt.Errorf("parse heartbeat interval: %w", err)
 	}
-	if _, err := time.ParseDuration(options.ExecutionTimeout); err != nil {
+	if err := validatePositiveDuration("execution timeout", options.ExecutionTimeout); err != nil {
 		return fmt.Errorf("parse execution timeout: %w", err)
 	}
-	if _, err := time.ParseDuration(options.ModuleFetchTimeout); err != nil {
+	if err := validatePositiveDuration("module fetch timeout", options.ModuleFetchTimeout); err != nil {
 		return fmt.Errorf("parse module fetch timeout: %w", err)
 	}
-	if _, err := time.ParseDuration(options.ShutdownTimeout); err != nil {
+	if err := validatePositiveDuration("worker shutdown timeout", options.ShutdownTimeout); err != nil {
 		return fmt.Errorf("parse worker shutdown timeout: %w", err)
 	}
-	if _, err := time.ParseDuration(options.ModuleCacheTTL); err != nil {
+	if err := validatePositiveDuration("module cache ttl", options.ModuleCacheTTL); err != nil {
 		return fmt.Errorf("parse module cache ttl: %w", err)
 	}
 	if options.MaxModuleBytes <= 0 {
@@ -297,6 +297,18 @@ func validateWorker(options WorkerOptions) error {
 	}
 	if options.MaxCacheBytes <= 0 {
 		return fmt.Errorf("max cache bytes must be greater than zero")
+	}
+
+	return nil
+}
+
+func validatePositiveDuration(label string, value string) error {
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return err
+	}
+	if parsed <= 0 {
+		return fmt.Errorf("%s must be greater than zero", label)
 	}
 
 	return nil

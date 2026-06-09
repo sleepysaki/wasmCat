@@ -5,6 +5,8 @@ wasmCat reads runtime configuration from environment variables and keeps local-d
 Module cache behavior is documented in [MODULE_CACHE_LIFECYCLE.md](MODULE_CACHE_LIFECYCLE.md).
 Execution client authorization is documented in [EXECUTION_AUTHORIZATION.md](EXECUTION_AUTHORIZATION.md).
 
+All duration values use Go duration syntax, such as `5s`, `30s`, or `30m`, and must be greater than zero.
+
 ## Master
 
 | Variable | Default | Purpose |
