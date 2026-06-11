@@ -232,3 +232,56 @@ func TestMasterMetricsReportsRequestIdempotencyOutcomes(t *testing.T) {
 		t.Fatalf("expected one in-progress conflict, got %+v", response.Master)
 	}
 }
+
+func TestMasterMetricsReportsRequestTrackerStats(t *testing.T) {
+	workerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req shared.ExecutionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode worker request: %v", err)
+		}
+		shared.WriteJSON(w, http.StatusOK, shared.ExecutionResponse{
+			RequestID: req.RequestID,
+			Result:    "ok",
+		})
+	}))
+	defer workerServer.Close()
+
+	registry := master.NewRegistry()
+	registry.RegisterWorker(shared.WorkerNode{
+		ID:        "worker-tracker-stats",
+		IPAddress: workerServer.URL,
+	})
+	gateway := &master.Gateway{
+		Registry:               registry,
+		RequestCacheMaxEntries: 1,
+		Dispatcher: &master.Dispatcher{
+			Registry:  registry,
+			Scheduler: &master.Scheduler{},
+			Client:    http.DefaultClient,
+		},
+	}
+	handler := gateway.Handler()
+
+	firstBody := `{"request_id":"req-tracker-one","module_name":"echo","module_url":"http://module.test/echo.wasm","payload":"one"}`
+	secondBody := `{"request_id":"req-tracker-two","module_name":"echo","module_url":"http://module.test/echo.wasm","payload":"two"}`
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/execute", strings.NewReader(firstBody)))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/execute", strings.NewReader(secondBody)))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/wasmcat/metrics", nil))
+
+	var response shared.MetricsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode metrics response: %v", err)
+	}
+	if response.Master == nil || response.Master.RequestTracker == nil {
+		t.Fatalf("expected request tracker stats, got %+v", response.Master)
+	}
+	stats := response.Master.RequestTracker
+	if stats.Entries != 1 || stats.Completed != 1 || stats.InFlight != 0 {
+		t.Fatalf("unexpected request tracker entry stats: %+v", stats)
+	}
+	if stats.MaxEntries != 1 || stats.Evictions != 1 {
+		t.Fatalf("unexpected request tracker capacity stats: %+v", stats)
+	}
+}

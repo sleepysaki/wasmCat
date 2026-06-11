@@ -141,7 +141,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/master/request_tracker.go`
 
 - **Name & Responsibility:** Provides process-local idempotency tracking for `/api/v1/execute` requests.
-- **State & Properties:** Mutex-protected map keyed by `request_id`, request fingerprints, in-flight/completed state, cached successful `ExecutionResponse`, TTL, max entry count, and clock function.
+- **State & Properties:** Mutex-protected map keyed by `request_id`, request fingerprints, in-flight/completed state, cached successful `ExecutionResponse`, TTL, max entry count, eviction/expiration counters, and clock function.
 - **Interactions:** `Gateway.handleExecute` calls `Begin`, `Complete`, and `Forget` to reject concurrent duplicates, return cached successes, detect request ID conflicts, and allow retries after dispatch failures.
 
 ### `internal/master/registry.go`
@@ -804,6 +804,13 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Return Values:** None.
 - **Error Handling:** None.
 - **Side Effects:** Deletes request tracking state so failed dispatches can be retried.
+
+##### `func (t *ExecutionRequestTracker) Stats() shared.RequestTrackerStats`
+
+- **Parameters:** None.
+- **Return Values:** Current idempotency tracker size, in-flight count, completed count, configured max entries, TTL seconds, eviction count, and expiration count.
+- **Error Handling:** None.
+- **Side Effects:** Removes expired completed entries before counting so `/wasmcat/metrics` reflects current cache state.
 
 ### ACR functions
 

@@ -29,5 +29,6 @@ This cache is process-local and in memory. A master restart clears it, and multi
 - Watch `master.request_cache_hits` to confirm client retries are being deduplicated.
 - Watch `master.request_in_progress_conflicts` for clients retrying too aggressively before the first request completes.
 - Treat any `master.request_id_conflicts` as a client bug or request identity collision.
+- Watch `master.request_tracker.entries`, `master.request_tracker.evictions`, and `master.request_tracker.expired` to tune cache size and TTL.
 - This feature prevents accidental duplicate dispatch through one master process. It is not a durable exactly-once execution system.
 - Durable idempotency across restarts or multiple masters would require external storage and stricter request ownership.

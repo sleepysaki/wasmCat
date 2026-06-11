@@ -29,6 +29,9 @@ type ExecutionRequestTracker struct {
 	entries    map[string]trackedExecutionRequest
 	ttl        time.Duration
 	maxEntries int
+	evictions  uint64
+	expired    uint64
+	sequence   uint64
 	now        func() time.Time
 }
 
@@ -37,7 +40,7 @@ type trackedExecutionRequest struct {
 	state       ExecutionRequestDecision
 	response    shared.ExecutionResponse
 	completedAt time.Time
-	lastSeenAt  time.Time
+	lastSeen    uint64
 }
 
 type ExecutionRequestStatus struct {
@@ -86,7 +89,7 @@ func (t *ExecutionRequestTracker) Begin(req shared.ExecutionRequest) (ExecutionR
 		t.entries[req.RequestID] = trackedExecutionRequest{
 			fingerprint: fingerprint,
 			state:       ExecutionRequestStarted,
-			lastSeenAt:  now,
+			lastSeen:    t.nextSequenceLocked(),
 		}
 		t.evictCompletedOverLimitLocked()
 		return ExecutionRequestStatus{Decision: ExecutionRequestStarted}, nil
@@ -99,7 +102,7 @@ func (t *ExecutionRequestTracker) Begin(req shared.ExecutionRequest) (ExecutionR
 	case ExecutionRequestStarted:
 		return ExecutionRequestStatus{Decision: ExecutionRequestInFlight}, nil
 	case ExecutionRequestCompleted:
-		entry.lastSeenAt = now
+		entry.lastSeen = t.nextSequenceLocked()
 		t.entries[req.RequestID] = entry
 		return ExecutionRequestStatus{
 			Decision: ExecutionRequestCompleted,
@@ -126,7 +129,7 @@ func (t *ExecutionRequestTracker) Complete(requestID string, response shared.Exe
 	entry.response = response
 	now := t.now()
 	entry.completedAt = now
-	entry.lastSeenAt = now
+	entry.lastSeen = t.nextSequenceLocked()
 	t.entries[requestID] = entry
 	t.evictCompletedOverLimitLocked()
 }
@@ -141,10 +144,40 @@ func (t *ExecutionRequestTracker) Forget(requestID string) {
 	delete(t.entries, requestID)
 }
 
+func (t *ExecutionRequestTracker) Stats() shared.RequestTrackerStats {
+	if t == nil {
+		return shared.RequestTrackerStats{}
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.removeExpiredCompletedLocked(t.now())
+
+	stats := shared.RequestTrackerStats{
+		Entries:    len(t.entries),
+		MaxEntries: t.maxEntries,
+		TTLSeconds: int64(t.ttl.Seconds()),
+		Evictions:  t.evictions,
+		Expired:    t.expired,
+	}
+	for _, entry := range t.entries {
+		switch entry.state {
+		case ExecutionRequestCompleted:
+			stats.Completed++
+		default:
+			stats.InFlight++
+		}
+	}
+
+	return stats
+}
+
 func (t *ExecutionRequestTracker) removeExpiredCompletedLocked(now time.Time) {
 	for requestID, entry := range t.entries {
 		if entry.state == ExecutionRequestCompleted && now.Sub(entry.completedAt) > t.ttl {
 			delete(t.entries, requestID)
+			t.expired++
 		}
 	}
 }
@@ -152,15 +185,15 @@ func (t *ExecutionRequestTracker) removeExpiredCompletedLocked(now time.Time) {
 func (t *ExecutionRequestTracker) evictCompletedOverLimitLocked() {
 	for len(t.entries) > t.maxEntries {
 		var oldestRequestID string
-		var oldestSeen time.Time
+		var oldestSeen uint64
 		foundCompleted := false
 		for requestID, entry := range t.entries {
 			if entry.state != ExecutionRequestCompleted {
 				continue
 			}
-			if !foundCompleted || entry.lastSeenAt.Before(oldestSeen) {
+			if !foundCompleted || entry.lastSeen < oldestSeen {
 				oldestRequestID = requestID
-				oldestSeen = entry.lastSeenAt
+				oldestSeen = entry.lastSeen
 				foundCompleted = true
 			}
 		}
@@ -168,7 +201,13 @@ func (t *ExecutionRequestTracker) evictCompletedOverLimitLocked() {
 			return
 		}
 		delete(t.entries, oldestRequestID)
+		t.evictions++
 	}
+}
+
+func (t *ExecutionRequestTracker) nextSequenceLocked() uint64 {
+	t.sequence++
+	return t.sequence
 }
 
 func executionRequestFingerprint(req shared.ExecutionRequest) (string, error) {

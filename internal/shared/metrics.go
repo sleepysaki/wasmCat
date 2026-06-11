@@ -53,10 +53,11 @@ type MasterMetrics struct {
 	DispatchReschedules uint64 `json:"dispatch_reschedules"`
 	// DispatchRescheduleExhausted means a request only saw retryable failures, but no
 	// remaining schedulable worker could complete it.
-	DispatchRescheduleExhausted uint64 `json:"dispatch_reschedule_exhausted"`
-	RequestCacheHits            uint64 `json:"request_cache_hits"`
-	RequestInProgressConflicts  uint64 `json:"request_in_progress_conflicts"`
-	RequestIDConflicts          uint64 `json:"request_id_conflicts"`
+	DispatchRescheduleExhausted uint64               `json:"dispatch_reschedule_exhausted"`
+	RequestCacheHits            uint64               `json:"request_cache_hits"`
+	RequestInProgressConflicts  uint64               `json:"request_in_progress_conflicts"`
+	RequestIDConflicts          uint64               `json:"request_id_conflicts"`
+	RequestTracker              *RequestTrackerStats `json:"request_tracker,omitempty"`
 }
 
 type WorkerMetrics struct {
@@ -70,6 +71,16 @@ type ModuleCacheStats struct {
 	Bytes      int64 `json:"bytes"`
 	MaxEntries int   `json:"max_entries"`
 	MaxBytes   int64 `json:"max_bytes"`
+}
+
+type RequestTrackerStats struct {
+	Entries    int    `json:"entries"`
+	InFlight   int    `json:"in_flight"`
+	Completed  int    `json:"completed"`
+	MaxEntries int    `json:"max_entries"`
+	TTLSeconds int64  `json:"ttl_seconds"`
+	Evictions  uint64 `json:"evictions"`
+	Expired    uint64 `json:"expired"`
 }
 
 func NewMetrics() *Metrics {
@@ -202,6 +213,10 @@ func (m *Metrics) SnapshotBase(role string, nodeID string) MetricsResponse {
 }
 
 func (m *Metrics) MasterSnapshot(activeWorkers int, workersByState map[string]int, oldestHeartbeatSeconds *int64) MetricsResponse {
+	return m.MasterSnapshotWithRequestTracker(activeWorkers, workersByState, oldestHeartbeatSeconds, nil)
+}
+
+func (m *Metrics) MasterSnapshotWithRequestTracker(activeWorkers int, workersByState map[string]int, oldestHeartbeatSeconds *int64, requestTracker *RequestTrackerStats) MetricsResponse {
 	response := m.SnapshotBase("master", "")
 
 	m.mu.RLock()
@@ -217,6 +232,7 @@ func (m *Metrics) MasterSnapshot(activeWorkers int, workersByState map[string]in
 		RequestCacheHits:            m.requestCacheHits,
 		RequestInProgressConflicts:  m.requestInProgressConflicts,
 		RequestIDConflicts:          m.requestIDConflicts,
+		RequestTracker:              requestTracker,
 	}
 
 	return response

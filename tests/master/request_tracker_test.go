@@ -24,6 +24,10 @@ func TestExecutionRequestTrackerEvictsLeastRecentCompletedEntry(t *testing.T) {
 	tracker.Complete(req3.RequestID, shared.ExecutionResponse{RequestID: req3.RequestID, Result: "three"})
 
 	mustBegin(t, tracker, req2, master.ExecutionRequestStarted)
+	stats := tracker.Stats()
+	if stats.Entries != 2 || stats.Completed != 1 || stats.InFlight != 1 || stats.Evictions != 2 {
+		t.Fatalf("unexpected tracker stats after eviction: %+v", stats)
+	}
 }
 
 func TestExecutionRequestTrackerDoesNotEvictInFlightEntries(t *testing.T) {
@@ -38,6 +42,24 @@ func TestExecutionRequestTrackerDoesNotEvictInFlightEntries(t *testing.T) {
 
 	mustBegin(t, tracker, inFlight, master.ExecutionRequestInFlight)
 	mustBegin(t, tracker, completed, master.ExecutionRequestStarted)
+}
+
+func TestExecutionRequestTrackerStatsCountsExpiredEntries(t *testing.T) {
+	tracker := master.NewExecutionRequestTrackerWithLimit(time.Nanosecond, 2)
+
+	req := shared.ExecutionRequest{RequestID: "req-expire", ModuleName: "echo", ModuleURL: "http://module.test/expire.wasm"}
+	mustBegin(t, tracker, req, master.ExecutionRequestStarted)
+	tracker.Complete(req.RequestID, shared.ExecutionResponse{RequestID: req.RequestID, Result: "done"})
+
+	time.Sleep(time.Millisecond)
+
+	stats := tracker.Stats()
+	if stats.Entries != 0 || stats.Expired != 1 {
+		t.Fatalf("expected expired completed entry, got %+v", stats)
+	}
+	if stats.MaxEntries != 2 {
+		t.Fatalf("expected max entries 2, got %+v", stats)
+	}
 }
 
 func mustBegin(t *testing.T, tracker *master.ExecutionRequestTracker, req shared.ExecutionRequest, expected master.ExecutionRequestDecision) {

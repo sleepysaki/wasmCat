@@ -108,8 +108,9 @@ func (g *Gateway) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		workersByState = g.Registry.WorkerStateCounts()
 		oldestHeartbeatSeconds = g.Registry.OldestHeartbeatAge(time.Now())
 	}
+	requestTrackerStats := g.requests().Stats()
 
-	shared.WriteJSON(w, http.StatusOK, g.metrics().MasterSnapshot(activeWorkers, workersByState, oldestHeartbeatSeconds))
+	shared.WriteJSON(w, http.StatusOK, g.metrics().MasterSnapshotWithRequestTracker(activeWorkers, workersByState, oldestHeartbeatSeconds, &requestTrackerStats))
 }
 
 func (g *Gateway) handleRegister(w http.ResponseWriter, r *http.Request) {

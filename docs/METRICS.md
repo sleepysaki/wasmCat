@@ -37,6 +37,13 @@ The `master` object contains:
 | `request_cache_hits` | Duplicate completed `request_id` requests served from the master response cache without worker dispatch. |
 | `request_in_progress_conflicts` | Duplicate `request_id` requests rejected because the original request is still running. |
 | `request_id_conflicts` | Requests rejected because a `request_id` was reused with different execution content. |
+| `request_tracker.entries` | Current request-idempotency records held in memory. |
+| `request_tracker.in_flight` | Current in-flight request IDs. |
+| `request_tracker.completed` | Current completed response records available for duplicate retries. |
+| `request_tracker.max_entries` | Configured idempotency tracker entry limit. |
+| `request_tracker.ttl_seconds` | Configured completed-response TTL in seconds. |
+| `request_tracker.evictions` | Completed records evicted because the max-entry limit was reached. |
+| `request_tracker.expired` | Completed records removed because their TTL expired. |
 
 ## Worker Fields
 
@@ -58,3 +65,5 @@ The current format is JSON for simplicity and zero dependencies. It is suitable 
 High `dispatch_reschedules` means workers are becoming unavailable after registration but before execution. High `dispatch_reschedule_exhausted` means the master is running out of healthy execution capacity for at least some requests.
 
 High `request_cache_hits` usually means clients are retrying safely. High `request_in_progress_conflicts` means clients are retrying before the original request completes. Any `request_id_conflicts` should be investigated because a caller is reusing request IDs for different work.
+
+When `request_tracker.entries` stays near `request_tracker.max_entries` and `request_tracker.evictions` rises, increase `EXECUTION_REQUEST_CACHE_MAX_ENTRIES` or reduce client retry windows. Rising `request_tracker.expired` is normal when completed request IDs age out.
