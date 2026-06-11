@@ -135,13 +135,13 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/master/gateway.go`
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
-- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, `Gateway.Requests`, optional `Gateway.ExecuteClientIDs`, module source policy, request body limit, request cache TTL, and graceful shutdown timeout.
+- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, `Gateway.Requests`, optional `Gateway.ExecuteClientIDs`, module source policy, request body limit, request cache TTL, request cache max entries, and graceful shutdown timeout.
 - **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain, validates execution client certificate identity when configured, checks request idempotency state, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
 
 ### `internal/master/request_tracker.go`
 
 - **Name & Responsibility:** Provides process-local idempotency tracking for `/api/v1/execute` requests.
-- **State & Properties:** Mutex-protected map keyed by `request_id`, request fingerprints, in-flight/completed state, cached successful `ExecutionResponse`, TTL, and clock function.
+- **State & Properties:** Mutex-protected map keyed by `request_id`, request fingerprints, in-flight/completed state, cached successful `ExecutionResponse`, TTL, max entry count, and clock function.
 - **Interactions:** `Gateway.handleExecute` calls `Begin`, `Complete`, and `Forget` to reject concurrent duplicates, return cached successes, detect request ID conflicts, and allow retries after dispatch failures.
 
 ### `internal/master/registry.go`
@@ -347,7 +347,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** None.
 - **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `WorkerStaleTimeout`, `ShutdownTimeout`, `MinWorkerCPUFree`, `MinWorkerRAMFreeMB`, `ModuleHostAllowlist`, and `RequireModuleDigest`.
-- **Error Handling:** Invalid or non-positive `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, `EXECUTION_REQUEST_CACHE_TTL`, or `MAX_EXECUTION_REQUEST_BYTES`; invalid `AUTO_GENERATE_CERTS` or `REQUIRE_MODULE_DIGEST`; `MIN_WORKER_CPU_FREE` outside `0..100`; negative `MIN_WORKER_RAM_FREE_MB`.
+- **Error Handling:** Invalid or non-positive `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, `EXECUTION_REQUEST_CACHE_TTL`, `EXECUTION_REQUEST_CACHE_MAX_ENTRIES`, or `MAX_EXECUTION_REQUEST_BYTES`; invalid `AUTO_GENERATE_CERTS` or `REQUIRE_MODULE_DIGEST`; `MIN_WORKER_CPU_FREE` outside `0..100`; negative `MIN_WORKER_RAM_FREE_MB`.
 - **Side Effects:** Reads process environment.
 
 ##### `func LoadWorker() (WorkerConfig, error)`
@@ -777,6 +777,13 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Error Handling:** None.
 - **Side Effects:** None.
 
+##### `func NewExecutionRequestTrackerWithLimit(ttl time.Duration, maxEntries int) *ExecutionRequestTracker`
+
+- **Parameters:** `ttl` controls completed response age. `maxEntries` controls total request records retained in memory. Non-positive values use defaults.
+- **Return Values:** Request tracker with TTL and max-entry bounds.
+- **Error Handling:** None.
+- **Side Effects:** None.
+
 ##### `func (t *ExecutionRequestTracker) Begin(req shared.ExecutionRequest) (ExecutionRequestStatus, error)`
 
 - **Parameters:** Execution request with normalized `RequestID`.
@@ -1093,6 +1100,7 @@ The core responsibility is to execute WASM modules on registered workers without
 | `EXECUTE_CLIENT_ALLOWLIST` | empty | comma-separated certificate identities | Optional client certificate CN or DNS SAN allowlist for `/api/v1/execute`. Empty allows any trusted mTLS client. |
 | `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | integer bytes | Maximum JSON body size accepted by master `/api/v1/execute`. |
 | `EXECUTION_REQUEST_CACHE_TTL` | `5m` | Go duration | How long successful execution responses remain cached by `request_id`. |
+| `EXECUTION_REQUEST_CACHE_MAX_ENTRIES` | `4096` | integer count | Maximum in-memory request records kept by the master idempotency tracker. |
 | `MODULE_HOST_ALLOWLIST` | empty | comma-separated hosts | Optional module URL host allowlist for `/api/v1/execute`. Empty allows any host. |
 | `REQUIRE_MODULE_DIGEST` | `false` | Go boolean string | When true, execution requests must include `module_digest` or use a digest-pinned OCI manifest/blob URL. |
 
@@ -1234,7 +1242,7 @@ output_len = uint32(result)
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
 - **Cold fetch coalescing is process-local:** Concurrent cold requests for the same cache key share one download/compile inside a worker process. Separate workers still compile independently.
-- **Request idempotency is process-local:** `request_id` prevents concurrent duplicate dispatch and caches successful responses for `EXECUTION_REQUEST_CACHE_TTL`, but the cache is in memory and is cleared on master restart.
+- **Request idempotency is process-local:** `request_id` prevents concurrent duplicate dispatch and caches successful responses for `EXECUTION_REQUEST_CACHE_TTL`, bounded by `EXECUTION_REQUEST_CACHE_MAX_ENTRIES`, but the cache is in memory and is cleared on master restart.
 - **Health/readiness require mTLS:** Because TLS client auth is configured at server level, probes must present valid client certificates unless TLS routing changes.
 - **Development cert generation overwrites at runtime:** `GenerateCAAndCerts` uses `os.Create`. Production should set `AUTO_GENERATE_CERTS=false`; bootstrap protects generated files unless `--force` is used.
 - **Telemetry is host-level, not cgroup-level:** gopsutil reports host CPU and memory. It does not currently account for per-service cgroup quotas.

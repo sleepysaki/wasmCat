@@ -26,6 +26,7 @@ Byte and count limits must be greater than zero. CPU scheduling thresholds must 
 | `EXECUTE_CLIENT_ALLOWLIST` | empty | Comma-separated client certificate CN or DNS SAN values allowed to call `/api/v1/execute`. Empty means any trusted mTLS client can execute work. |
 | `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | Maximum JSON body size accepted by the master `/api/v1/execute` endpoint. |
 | `EXECUTION_REQUEST_CACHE_TTL` | `5m` | How long successful `/api/v1/execute` responses are cached by `request_id` for duplicate client retries. |
+| `EXECUTION_REQUEST_CACHE_MAX_ENTRIES` | `4096` | Maximum in-memory request records kept by the master idempotency tracker. Completed records are evicted before in-flight records. |
 | `MODULE_HOST_ALLOWLIST` | empty | Comma-separated module URL hosts allowed by `/api/v1/execute`. Empty allows any host. |
 | `REQUIRE_MODULE_DIGEST` | `false` | Require `module_digest` or a digest-pinned OCI manifest/blob URL before dispatch. |
 

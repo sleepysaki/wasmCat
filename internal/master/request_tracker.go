@@ -10,7 +10,10 @@ import (
 	"wasmcat/internal/shared"
 )
 
-const DefaultExecutionRequestCacheTTL = 5 * time.Minute
+const (
+	DefaultExecutionRequestCacheTTL        = 5 * time.Minute
+	DefaultExecutionRequestCacheMaxEntries = 4096
+)
 
 type ExecutionRequestDecision int
 
@@ -22,10 +25,11 @@ const (
 )
 
 type ExecutionRequestTracker struct {
-	mu      sync.Mutex
-	entries map[string]trackedExecutionRequest
-	ttl     time.Duration
-	now     func() time.Time
+	mu         sync.Mutex
+	entries    map[string]trackedExecutionRequest
+	ttl        time.Duration
+	maxEntries int
+	now        func() time.Time
 }
 
 type trackedExecutionRequest struct {
@@ -33,6 +37,7 @@ type trackedExecutionRequest struct {
 	state       ExecutionRequestDecision
 	response    shared.ExecutionResponse
 	completedAt time.Time
+	lastSeenAt  time.Time
 }
 
 type ExecutionRequestStatus struct {
@@ -41,14 +46,22 @@ type ExecutionRequestStatus struct {
 }
 
 func NewExecutionRequestTracker(ttl time.Duration) *ExecutionRequestTracker {
+	return NewExecutionRequestTrackerWithLimit(ttl, DefaultExecutionRequestCacheMaxEntries)
+}
+
+func NewExecutionRequestTrackerWithLimit(ttl time.Duration, maxEntries int) *ExecutionRequestTracker {
 	if ttl <= 0 {
 		ttl = DefaultExecutionRequestCacheTTL
 	}
+	if maxEntries <= 0 {
+		maxEntries = DefaultExecutionRequestCacheMaxEntries
+	}
 
 	return &ExecutionRequestTracker{
-		entries: make(map[string]trackedExecutionRequest),
-		ttl:     ttl,
-		now:     time.Now,
+		entries:    make(map[string]trackedExecutionRequest),
+		ttl:        ttl,
+		maxEntries: maxEntries,
+		now:        time.Now,
 	}
 }
 
@@ -65,14 +78,17 @@ func (t *ExecutionRequestTracker) Begin(req shared.ExecutionRequest) (ExecutionR
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.removeExpiredCompletedLocked(t.now())
+	now := t.now()
+	t.removeExpiredCompletedLocked(now)
 
 	entry, exists := t.entries[req.RequestID]
 	if !exists {
 		t.entries[req.RequestID] = trackedExecutionRequest{
 			fingerprint: fingerprint,
 			state:       ExecutionRequestStarted,
+			lastSeenAt:  now,
 		}
+		t.evictCompletedOverLimitLocked()
 		return ExecutionRequestStatus{Decision: ExecutionRequestStarted}, nil
 	}
 	if entry.fingerprint != fingerprint {
@@ -83,6 +99,8 @@ func (t *ExecutionRequestTracker) Begin(req shared.ExecutionRequest) (ExecutionR
 	case ExecutionRequestStarted:
 		return ExecutionRequestStatus{Decision: ExecutionRequestInFlight}, nil
 	case ExecutionRequestCompleted:
+		entry.lastSeenAt = now
+		t.entries[req.RequestID] = entry
 		return ExecutionRequestStatus{
 			Decision: ExecutionRequestCompleted,
 			Response: entry.response,
@@ -106,8 +124,11 @@ func (t *ExecutionRequestTracker) Complete(requestID string, response shared.Exe
 	}
 	entry.state = ExecutionRequestCompleted
 	entry.response = response
-	entry.completedAt = t.now()
+	now := t.now()
+	entry.completedAt = now
+	entry.lastSeenAt = now
 	t.entries[requestID] = entry
+	t.evictCompletedOverLimitLocked()
 }
 
 func (t *ExecutionRequestTracker) Forget(requestID string) {
@@ -125,6 +146,28 @@ func (t *ExecutionRequestTracker) removeExpiredCompletedLocked(now time.Time) {
 		if entry.state == ExecutionRequestCompleted && now.Sub(entry.completedAt) > t.ttl {
 			delete(t.entries, requestID)
 		}
+	}
+}
+
+func (t *ExecutionRequestTracker) evictCompletedOverLimitLocked() {
+	for len(t.entries) > t.maxEntries {
+		var oldestRequestID string
+		var oldestSeen time.Time
+		foundCompleted := false
+		for requestID, entry := range t.entries {
+			if entry.state != ExecutionRequestCompleted {
+				continue
+			}
+			if !foundCompleted || entry.lastSeenAt.Before(oldestSeen) {
+				oldestRequestID = requestID
+				oldestSeen = entry.lastSeenAt
+				foundCompleted = true
+			}
+		}
+		if !foundCompleted {
+			return
+		}
+		delete(t.entries, oldestRequestID)
 	}
 }
 

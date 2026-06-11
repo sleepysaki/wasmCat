@@ -12,22 +12,23 @@ import (
 )
 
 type MasterOptions struct {
-	ConfigDir           string
-	CertDir             string
-	Port                string
-	CleanupInterval     string
-	WorkerStaleTimeout  string
-	ShutdownTimeout     string
-	MinWorkerCPUFree    float64
-	MinWorkerRAMFreeMB  float64
-	ExecuteClientIDs    string
-	MaxExecuteBodyBytes int64
-	RequestCacheTTL     string
-	ModuleHostAllowlist string
-	RequireModuleDigest bool
-	DevWorkerID         string
-	GenerateDevCerts    bool
-	Force               bool
+	ConfigDir              string
+	CertDir                string
+	Port                   string
+	CleanupInterval        string
+	WorkerStaleTimeout     string
+	ShutdownTimeout        string
+	MinWorkerCPUFree       float64
+	MinWorkerRAMFreeMB     float64
+	ExecuteClientIDs       string
+	MaxExecuteBodyBytes    int64
+	RequestCacheTTL        string
+	RequestCacheMaxEntries int
+	ModuleHostAllowlist    string
+	RequireModuleDigest    bool
+	DevWorkerID            string
+	GenerateDevCerts       bool
+	Force                  bool
 }
 
 type WorkerOptions struct {
@@ -95,6 +96,7 @@ func InitMaster(options MasterOptions) (Result, error) {
 		{"EXECUTE_CLIENT_ALLOWLIST", options.ExecuteClientIDs},
 		{"MAX_EXECUTION_REQUEST_BYTES", strconv.FormatInt(options.MaxExecuteBodyBytes, 10)},
 		{"EXECUTION_REQUEST_CACHE_TTL", options.RequestCacheTTL},
+		{"EXECUTION_REQUEST_CACHE_MAX_ENTRIES", strconv.Itoa(options.RequestCacheMaxEntries)},
 		{"MODULE_HOST_ALLOWLIST", options.ModuleHostAllowlist},
 		{"REQUIRE_MODULE_DIGEST", strconv.FormatBool(options.RequireModuleDigest)},
 	}
@@ -174,6 +176,9 @@ func normalizeMaster(options MasterOptions) MasterOptions {
 	}
 	if options.RequestCacheTTL == "" {
 		options.RequestCacheTTL = "5m"
+	}
+	if options.RequestCacheMaxEntries == 0 {
+		options.RequestCacheMaxEntries = 4096
 	}
 	if options.DevWorkerID == "" {
 		options.DevWorkerID = "worker-vn-01"
@@ -256,6 +261,9 @@ func validateMaster(options MasterOptions) error {
 	}
 	if err := validatePositiveDuration("execution request cache ttl", options.RequestCacheTTL); err != nil {
 		return fmt.Errorf("parse execution request cache ttl: %w", err)
+	}
+	if options.RequestCacheMaxEntries <= 0 {
+		return fmt.Errorf("execution request cache max entries must be greater than zero")
 	}
 
 	return nil

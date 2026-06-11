@@ -143,6 +143,7 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	t.Setenv("EXECUTE_CLIENT_ALLOWLIST", "wasmcat-client, deployer.internal ")
 	t.Setenv("MAX_EXECUTION_REQUEST_BYTES", "4096")
 	t.Setenv("EXECUTION_REQUEST_CACHE_TTL", "2m")
+	t.Setenv("EXECUTION_REQUEST_CACHE_MAX_ENTRIES", "17")
 	t.Setenv("MODULE_HOST_ALLOWLIST", "modules.internal, registry.azurecr.io ")
 	t.Setenv("REQUIRE_MODULE_DIGEST", "true")
 
@@ -180,6 +181,9 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	}
 	if cfg.RequestCacheTTL != 2*time.Minute {
 		t.Fatalf("expected request cache ttl 2m, got %s", cfg.RequestCacheTTL)
+	}
+	if cfg.RequestCacheMaxEntries != 17 {
+		t.Fatalf("expected request cache max entries 17, got %d", cfg.RequestCacheMaxEntries)
 	}
 	if len(cfg.ModuleHostAllowlist) != 2 || cfg.ModuleHostAllowlist[0] != "modules.internal" || cfg.ModuleHostAllowlist[1] != "registry.azurecr.io" {
 		t.Fatalf("unexpected module host allowlist: %+v", cfg.ModuleHostAllowlist)
@@ -236,6 +240,15 @@ func TestLoadMasterRejectsNonPositiveExecutionBodyLimit(t *testing.T) {
 	_, err := config.LoadMaster()
 	if err == nil {
 		t.Fatal("expected non-positive max execution request bytes error")
+	}
+}
+
+func TestLoadMasterRejectsNonPositiveRequestCacheMaxEntries(t *testing.T) {
+	t.Setenv("EXECUTION_REQUEST_CACHE_MAX_ENTRIES", "0")
+
+	_, err := config.LoadMaster()
+	if err == nil {
+		t.Fatal("expected non-positive request cache max entries error")
 	}
 }
 

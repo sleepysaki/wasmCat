@@ -29,7 +29,7 @@ Accepted client IDs are limited to 128 characters and may contain letters, digit
 2. The dispatcher forwards the same ID to the selected worker.
 3. The worker returns the same ID in `ExecutionResponse`.
 4. The master returns that ID to the client and logs it around scheduling and dispatch.
-5. After a successful response, the master keeps the response for `EXECUTION_REQUEST_CACHE_TTL` so a duplicate request with the same ID and same content can receive the cached response without dispatching again.
+5. After a successful response, the master keeps the response for `EXECUTION_REQUEST_CACHE_TTL`, bounded by `EXECUTION_REQUEST_CACHE_MAX_ENTRIES`, so a duplicate request with the same ID and same content can receive the cached response without dispatching again.
 
 The worker also includes `execution_time_ms` in the response. This is measured around the worker-side invoke path: request validation, cache lookup or module fetch, WASM instantiation, execution, and response construction.
 

@@ -18,6 +18,8 @@ When an execution request reaches the master:
 
 `EXECUTION_REQUEST_CACHE_TTL` controls how long successful responses remain available for duplicate request IDs. The default is `5m`.
 
+`EXECUTION_REQUEST_CACHE_MAX_ENTRIES` controls the maximum number of in-memory request records kept by the master. The default is `4096`. When the tracker exceeds this limit, it evicts the least recently used completed records first. In-flight records are not evicted because doing so could allow duplicate execution while the original request is still running.
+
 This cache is process-local and in memory. A master restart clears it, and multiple master instances do not share request history.
 
 ## Operational Notes

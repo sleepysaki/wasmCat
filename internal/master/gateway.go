@@ -37,9 +37,10 @@ type Gateway struct {
 	// identities by common name or DNS SAN.
 	ExecuteClientIDs []string
 
-	MaxExecuteBodyBytes int64
-	ModulePolicy        ModulePolicy
-	RequestCacheTTL     time.Duration
+	MaxExecuteBodyBytes    int64
+	ModulePolicy           ModulePolicy
+	RequestCacheTTL        time.Duration
+	RequestCacheMaxEntries int
 	// How long the master waits for active HTTP requests after SIGINT/SIGTERM.
 	// This protects shutdown from hanging forever while still giving in-flight requests a chance to finish.
 	ShutdownTimeout time.Duration
@@ -344,7 +345,7 @@ func (g *Gateway) metrics() *shared.Metrics {
 
 func (g *Gateway) requests() *ExecutionRequestTracker {
 	if g.Requests == nil {
-		g.Requests = NewExecutionRequestTracker(g.requestCacheTTL())
+		g.Requests = NewExecutionRequestTrackerWithLimit(g.requestCacheTTL(), g.requestCacheMaxEntries())
 	}
 
 	return g.Requests
@@ -370,6 +371,14 @@ func (g *Gateway) requestCacheTTL() time.Duration {
 	}
 
 	return DefaultExecutionRequestCacheTTL
+}
+
+func (g *Gateway) requestCacheMaxEntries() int {
+	if g.RequestCacheMaxEntries > 0 {
+		return g.RequestCacheMaxEntries
+	}
+
+	return DefaultExecutionRequestCacheMaxEntries
 }
 
 func limitRequestBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {

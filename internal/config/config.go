@@ -22,20 +22,21 @@ type Limits struct {
 }
 
 type MasterConfig struct {
-	Port                string
-	CertDir             string
-	AutoGenerateCerts   bool
-	WorkerIDForCert     string
-	CleanupInterval     time.Duration
-	WorkerStaleTimeout  time.Duration
-	ShutdownTimeout     time.Duration
-	MinWorkerCPUFree    float64
-	MinWorkerRAMFreeMB  float64
-	ExecuteClientIDs    []string
-	MaxExecuteBodyBytes int64
-	RequestCacheTTL     time.Duration
-	ModuleHostAllowlist []string
-	RequireModuleDigest bool
+	Port                   string
+	CertDir                string
+	AutoGenerateCerts      bool
+	WorkerIDForCert        string
+	CleanupInterval        time.Duration
+	WorkerStaleTimeout     time.Duration
+	ShutdownTimeout        time.Duration
+	MinWorkerCPUFree       float64
+	MinWorkerRAMFreeMB     float64
+	ExecuteClientIDs       []string
+	MaxExecuteBodyBytes    int64
+	RequestCacheTTL        time.Duration
+	RequestCacheMaxEntries int
+	ModuleHostAllowlist    []string
+	RequireModuleDigest    bool
 }
 
 type WorkerConfig struct {
@@ -89,26 +90,31 @@ func LoadMaster() (MasterConfig, error) {
 	if err != nil {
 		return MasterConfig{}, err
 	}
+	requestCacheMaxEntries, err := positiveIntEnv("EXECUTION_REQUEST_CACHE_MAX_ENTRIES", 4096)
+	if err != nil {
+		return MasterConfig{}, err
+	}
 	requireModuleDigest, err := boolEnv("REQUIRE_MODULE_DIGEST", false)
 	if err != nil {
 		return MasterConfig{}, err
 	}
 
 	cfg := MasterConfig{
-		Port:                stringEnv("MASTER_PORT", "7270"),
-		CertDir:             stringEnv("CERT_DIR", "./certs"),
-		AutoGenerateCerts:   autoGenerateCerts,
-		WorkerIDForCert:     stringEnv("DEV_WORKER_ID", "worker-vn-01"),
-		CleanupInterval:     cleanupInterval,
-		WorkerStaleTimeout:  workerStaleTimeout,
-		ShutdownTimeout:     shutdownTimeout,
-		MinWorkerCPUFree:    minWorkerCPUFree,
-		MinWorkerRAMFreeMB:  minWorkerRAMFreeMB,
-		ExecuteClientIDs:    listEnv("EXECUTE_CLIENT_ALLOWLIST"),
-		MaxExecuteBodyBytes: maxExecuteBodyBytes,
-		RequestCacheTTL:     requestCacheTTL,
-		ModuleHostAllowlist: listEnv("MODULE_HOST_ALLOWLIST"),
-		RequireModuleDigest: requireModuleDigest,
+		Port:                   stringEnv("MASTER_PORT", "7270"),
+		CertDir:                stringEnv("CERT_DIR", "./certs"),
+		AutoGenerateCerts:      autoGenerateCerts,
+		WorkerIDForCert:        stringEnv("DEV_WORKER_ID", "worker-vn-01"),
+		CleanupInterval:        cleanupInterval,
+		WorkerStaleTimeout:     workerStaleTimeout,
+		ShutdownTimeout:        shutdownTimeout,
+		MinWorkerCPUFree:       minWorkerCPUFree,
+		MinWorkerRAMFreeMB:     minWorkerRAMFreeMB,
+		ExecuteClientIDs:       listEnv("EXECUTE_CLIENT_ALLOWLIST"),
+		MaxExecuteBodyBytes:    maxExecuteBodyBytes,
+		RequestCacheTTL:        requestCacheTTL,
+		RequestCacheMaxEntries: requestCacheMaxEntries,
+		ModuleHostAllowlist:    listEnv("MODULE_HOST_ALLOWLIST"),
+		RequireModuleDigest:    requireModuleDigest,
 	}
 
 	return cfg, nil

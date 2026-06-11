@@ -14,20 +14,21 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 	certDir := filepath.Join(configDir, "certs")
 
 	result, err := bootstrap.InitMaster(bootstrap.MasterOptions{
-		ConfigDir:           configDir,
-		CertDir:             certDir,
-		Port:                "9443",
-		CleanupInterval:     "30s",
-		WorkerStaleTimeout:  "90s",
-		ShutdownTimeout:     "12s",
-		MinWorkerCPUFree:    10,
-		MinWorkerRAMFreeMB:  256,
-		ExecuteClientIDs:    "wasmcat-client,deployer.internal",
-		MaxExecuteBodyBytes: 4096,
-		RequestCacheTTL:     "2m",
-		ModuleHostAllowlist: "modules.internal,registry.azurecr.io",
-		RequireModuleDigest: true,
-		DevWorkerID:         "worker-test-01",
+		ConfigDir:              configDir,
+		CertDir:                certDir,
+		Port:                   "9443",
+		CleanupInterval:        "30s",
+		WorkerStaleTimeout:     "90s",
+		ShutdownTimeout:        "12s",
+		MinWorkerCPUFree:       10,
+		MinWorkerRAMFreeMB:     256,
+		ExecuteClientIDs:       "wasmcat-client,deployer.internal",
+		MaxExecuteBodyBytes:    4096,
+		RequestCacheTTL:        "2m",
+		RequestCacheMaxEntries: 17,
+		ModuleHostAllowlist:    "modules.internal,registry.azurecr.io",
+		RequireModuleDigest:    true,
+		DevWorkerID:            "worker-test-01",
 	})
 	if err != nil {
 		t.Fatalf("InitMaster returned error: %v", err)
@@ -53,6 +54,7 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 	assertContains(t, env, "EXECUTE_CLIENT_ALLOWLIST=wasmcat-client,deployer.internal\n")
 	assertContains(t, env, "MAX_EXECUTION_REQUEST_BYTES=4096\n")
 	assertContains(t, env, "EXECUTION_REQUEST_CACHE_TTL=2m\n")
+	assertContains(t, env, "EXECUTION_REQUEST_CACHE_MAX_ENTRIES=17\n")
 	assertContains(t, env, "MODULE_HOST_ALLOWLIST=modules.internal,registry.azurecr.io\n")
 	assertContains(t, env, "REQUIRE_MODULE_DIGEST=true\n")
 }
@@ -122,6 +124,12 @@ func TestInitMasterRejectsInvalidCapacityThresholds(t *testing.T) {
 			name: "non-positive request cache ttl",
 			options: bootstrap.MasterOptions{
 				RequestCacheTTL: "0s",
+			},
+		},
+		{
+			name: "non-positive request cache max entries",
+			options: bootstrap.MasterOptions{
+				RequestCacheMaxEntries: -1,
 			},
 		},
 	}

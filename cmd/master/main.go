@@ -66,13 +66,14 @@ func main() {
 
 	// Create the API Gateway, need the Registry (to handle /register and /heartbeat) and the Dispatcher (to handle /api/v1/execute)
 	gateway := &master.Gateway{
-		Registry:            reg,
-		Dispatcher:          dispatch,
-		CertDir:             cfg.CertDir,
-		Metrics:             metrics,
-		ExecuteClientIDs:    cfg.ExecuteClientIDs,
-		MaxExecuteBodyBytes: cfg.MaxExecuteBodyBytes,
-		RequestCacheTTL:     cfg.RequestCacheTTL,
+		Registry:               reg,
+		Dispatcher:             dispatch,
+		CertDir:                cfg.CertDir,
+		Metrics:                metrics,
+		ExecuteClientIDs:       cfg.ExecuteClientIDs,
+		MaxExecuteBodyBytes:    cfg.MaxExecuteBodyBytes,
+		RequestCacheTTL:        cfg.RequestCacheTTL,
+		RequestCacheMaxEntries: cfg.RequestCacheMaxEntries,
 		ModulePolicy: master.ModulePolicy{
 			AllowedHosts:  cfg.ModuleHostAllowlist,
 			RequireDigest: cfg.RequireModuleDigest,
@@ -138,6 +139,7 @@ func runInit(args []string) error {
 	executeClientAllowlist := flags.String("execute-client-allowlist", "", "comma-separated client certificate CN or DNS SAN values allowed to call /api/v1/execute")
 	maxExecuteBodyBytes := flags.Int64("max-execution-request-bytes", 2<<20, "maximum JSON body size accepted by /api/v1/execute")
 	requestCacheTTL := flags.String("execution-request-cache-ttl", "5m", "how long successful request_id responses are cached for duplicate requests")
+	requestCacheMaxEntries := flags.Int("execution-request-cache-max-entries", 4096, "maximum in-memory request_id entries kept by the master")
 	moduleHostAllowlist := flags.String("module-host-allowlist", "", "comma-separated module URL hosts allowed by the master; empty allows any host")
 	requireModuleDigest := flags.Bool("require-module-digest", false, "require execution requests to include a module digest or digest-pinned OCI URL")
 	devWorkerID := flags.String("dev-worker-id", "worker-vn-01", "worker ID used when generating development certificates")
@@ -149,22 +151,23 @@ func runInit(args []string) error {
 	}
 
 	result, err := bootstrap.InitMaster(bootstrap.MasterOptions{
-		ConfigDir:           *configDir,
-		CertDir:             *certDir,
-		Port:                *port,
-		CleanupInterval:     *cleanupInterval,
-		WorkerStaleTimeout:  *workerStaleTimeout,
-		ShutdownTimeout:     *shutdownTimeout,
-		MinWorkerCPUFree:    *minWorkerCPUFree,
-		MinWorkerRAMFreeMB:  *minWorkerRAMFreeMB,
-		ExecuteClientIDs:    *executeClientAllowlist,
-		MaxExecuteBodyBytes: *maxExecuteBodyBytes,
-		RequestCacheTTL:     *requestCacheTTL,
-		ModuleHostAllowlist: *moduleHostAllowlist,
-		RequireModuleDigest: *requireModuleDigest,
-		DevWorkerID:         *devWorkerID,
-		GenerateDevCerts:    *devCerts,
-		Force:               *force,
+		ConfigDir:              *configDir,
+		CertDir:                *certDir,
+		Port:                   *port,
+		CleanupInterval:        *cleanupInterval,
+		WorkerStaleTimeout:     *workerStaleTimeout,
+		ShutdownTimeout:        *shutdownTimeout,
+		MinWorkerCPUFree:       *minWorkerCPUFree,
+		MinWorkerRAMFreeMB:     *minWorkerRAMFreeMB,
+		ExecuteClientIDs:       *executeClientAllowlist,
+		MaxExecuteBodyBytes:    *maxExecuteBodyBytes,
+		RequestCacheTTL:        *requestCacheTTL,
+		RequestCacheMaxEntries: *requestCacheMaxEntries,
+		ModuleHostAllowlist:    *moduleHostAllowlist,
+		RequireModuleDigest:    *requireModuleDigest,
+		DevWorkerID:            *devWorkerID,
+		GenerateDevCerts:       *devCerts,
+		Force:                  *force,
 	})
 	if err != nil {
 		return err
