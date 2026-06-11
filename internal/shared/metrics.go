@@ -29,6 +29,12 @@ type Metrics struct {
 
 	workerExecutionSuccess uint64
 	workerExecutionFailure uint64
+	// workerModuleDigestInvalid counts requests that provided a digest the worker could not validate.
+	// This usually points to caller input or manifest-resolution problems rather than bad module storage.
+	workerModuleDigestInvalid uint64
+	// workerModuleDigestMismatch counts requests where downloaded bytes did not match the declared digest.
+	// This is the stronger integrity signal because the remote content differs from the expected module.
+	workerModuleDigestMismatch uint64
 }
 
 type MetricsResponse struct {
@@ -61,9 +67,11 @@ type MasterMetrics struct {
 }
 
 type WorkerMetrics struct {
-	ExecutionSuccess uint64           `json:"execution_success"`
-	ExecutionFailure uint64           `json:"execution_failure"`
-	Cache            ModuleCacheStats `json:"cache"`
+	ExecutionSuccess     uint64           `json:"execution_success"`
+	ExecutionFailure     uint64           `json:"execution_failure"`
+	ModuleDigestInvalid  uint64           `json:"module_digest_invalid"`
+	ModuleDigestMismatch uint64           `json:"module_digest_mismatch"`
+	Cache                ModuleCacheStats `json:"cache"`
 }
 
 type ModuleCacheStats struct {
@@ -194,6 +202,26 @@ func (m *Metrics) IncWorkerExecutionFailure() {
 	m.workerExecutionFailure++
 }
 
+func (m *Metrics) IncWorkerModuleDigestInvalid() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.workerModuleDigestInvalid++
+}
+
+func (m *Metrics) IncWorkerModuleDigestMismatch() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.workerModuleDigestMismatch++
+}
+
 func (m *Metrics) SnapshotBase(role string, nodeID string) MetricsResponse {
 	if m == nil {
 		m = NewMetrics()
@@ -244,9 +272,11 @@ func (m *Metrics) WorkerSnapshot(nodeID string, cache ModuleCacheStats) MetricsR
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	response.Worker = &WorkerMetrics{
-		ExecutionSuccess: m.workerExecutionSuccess,
-		ExecutionFailure: m.workerExecutionFailure,
-		Cache:            cache,
+		ExecutionSuccess:     m.workerExecutionSuccess,
+		ExecutionFailure:     m.workerExecutionFailure,
+		ModuleDigestInvalid:  m.workerModuleDigestInvalid,
+		ModuleDigestMismatch: m.workerModuleDigestMismatch,
+		Cache:                cache,
 	}
 
 	return response

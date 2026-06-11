@@ -53,6 +53,8 @@ The `worker` object contains:
 | --- | --- |
 | `execution_success` | Successful `/invoke` executions. |
 | `execution_failure` | Failed `/invoke` executions. |
+| `module_digest_invalid` | Failed `/invoke` requests where `module_digest` was unsupported, incomplete, or malformed. |
+| `module_digest_mismatch` | Failed `/invoke` requests where downloaded WASM bytes did not match the declared SHA-256 digest. |
 | `cache.entries` | Current compiled module cache entries. |
 | `cache.bytes` | Raw WASM bytes represented by cache entries. |
 | `cache.max_entries` | Configured cache entry limit. |
@@ -67,3 +69,5 @@ High `dispatch_reschedules` means workers are becoming unavailable after registr
 High `request_cache_hits` usually means clients are retrying safely. High `request_in_progress_conflicts` means clients are retrying before the original request completes. Any `request_id_conflicts` should be investigated because a caller is reusing request IDs for different work.
 
 When `request_tracker.entries` stays near `request_tracker.max_entries` and `request_tracker.evictions` rises, increase `EXECUTION_REQUEST_CACHE_MAX_ENTRIES` or reduce client retry windows. Rising `request_tracker.expired` is normal when completed request IDs age out.
+
+High `module_digest_invalid` usually points to a client, manifest resolver, or deployment pipeline sending malformed digest values. High `module_digest_mismatch` should be treated as an integrity alert because the fetched module bytes do not match the immutable digest that the request declared.

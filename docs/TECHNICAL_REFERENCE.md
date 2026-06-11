@@ -117,7 +117,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/shared/metrics.go`
 
 - **Name & Responsibility:** Tracks process-local request, dispatch, execution, cache, and worker metrics.
-- **State & Properties:** Mutex-protected counters, start time, request counts by status/path, dispatch success/failure counters, dispatch reschedule counters, request idempotency counters, and worker execution counters.
+- **State & Properties:** Mutex-protected counters, start time, request counts by status/path, dispatch success/failure counters, dispatch reschedule counters, request idempotency counters, worker execution counters, and worker module digest failure counters.
 - **Interactions:** Logging middleware records request metrics; dispatcher records conservative reschedules; gateway records request idempotency outcomes; master and worker metrics endpoints expose snapshots.
 
 ### `internal/shared/client.go`
@@ -1188,7 +1188,7 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 413 body too large, 403 unauthorized execution client, 403 module policy violation, 409 duplicate/conflicting request ID, 400 invalid JSON/request, 503 dispatch failure. |
 | Worker | `GET` | `/wasmcat/health` | none | `HealthResponse` | 405 wrong method, JSON encode failure only. |
 | Worker | `GET` | `/wasmcat/ready` | none | `HealthResponse` | 405 wrong method, 503 if engine is nil. |
-| Worker | `GET` | `/wasmcat/metrics` | none | `MetricsResponse` | 405 wrong method, JSON encode failure only. |
+| Worker | `GET` | `/wasmcat/metrics` | none | `MetricsResponse` | 405 wrong method, JSON encode failure only. Includes execution, digest-failure, and module-cache counters. |
 | Worker | `POST` | `/invoke` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 503 if engine is nil, 400 invalid JSON/request/execution failure, 400 invalid digest, 400 digest mismatch. |
 
 Wrong methods return JSON error code `method_not_allowed` and an `Allow` header with the required method.

@@ -120,9 +120,11 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	slog.Info("worker execution request received", "request_id", req.RequestID, "module_name", req.ModuleName, "module_digest", req.ModuleDigest)
 	result, err := s.Engine.ExecuteWithDigest(r.Context(), req.ModuleName, req.ModuleURL, req.ModuleDigest, req.Payload, req.JITBearerToken)
 	if err != nil {
+		errorCode := workerExecutionErrorCode(err)
 		s.metrics().IncWorkerExecutionFailure()
+		s.observeWorkerExecutionError(errorCode)
 		slog.Error("worker execution request failed", "request_id", req.RequestID, "module_name", req.ModuleName, "duration_ms", time.Since(start).Milliseconds(), "error", err)
-		shared.WriteError(w, http.StatusBadRequest, workerExecutionErrorCode(err), err)
+		shared.WriteError(w, http.StatusBadRequest, errorCode, err)
 		return
 	}
 	s.metrics().IncWorkerExecutionSuccess()
@@ -149,6 +151,17 @@ func workerExecutionErrorCode(err error) string {
 	}
 
 	return "execution_failed"
+}
+
+func (s *WorkerServer) observeWorkerExecutionError(code string) {
+	// Keep digest counters separate from the generic failure count.
+	// A malformed digest is usually a caller problem; a mismatch can mean remote content drift.
+	switch code {
+	case "module_digest_invalid":
+		s.metrics().IncWorkerModuleDigestInvalid()
+	case "module_digest_mismatch":
+		s.metrics().IncWorkerModuleDigestMismatch()
+	}
 }
 
 func (s *WorkerServer) metrics() *shared.Metrics {
