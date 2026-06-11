@@ -54,6 +54,19 @@ func TestPublicErrorMessageCoversRequestIdempotencyCodes(t *testing.T) {
 	}
 }
 
+func TestPublicErrorMessageCoversModuleDigestCodes(t *testing.T) {
+	tests := map[string]string{
+		"module_digest_invalid":  "Module digest is invalid.",
+		"module_digest_mismatch": "Module digest does not match downloaded content.",
+	}
+
+	for code, expected := range tests {
+		if got := shared.PublicErrorMessage(code); got != expected {
+			t.Fatalf("expected %s message %q, got %q", code, expected, got)
+		}
+	}
+}
+
 func TestRequireMethodRejectsUnexpectedMethod(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/execute", nil)
 	rec := httptest.NewRecorder()

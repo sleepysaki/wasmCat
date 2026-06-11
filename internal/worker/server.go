@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json" // turn go struct into json and vice versa
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http" // http server to listen for requests from the main process and respond with results
@@ -121,7 +122,7 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.metrics().IncWorkerExecutionFailure()
 		slog.Error("worker execution request failed", "request_id", req.RequestID, "module_name", req.ModuleName, "duration_ms", time.Since(start).Milliseconds(), "error", err)
-		shared.WriteError(w, http.StatusBadRequest, "execution_failed", err)
+		shared.WriteError(w, http.StatusBadRequest, workerExecutionErrorCode(err), err)
 		return
 	}
 	s.metrics().IncWorkerExecutionSuccess()
@@ -136,6 +137,18 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("worker execution request completed", "request_id", req.RequestID, "module_name", req.ModuleName, "duration_ms", durationMs)
 	shared.WriteJSON(w, http.StatusOK, resp)
+}
+
+func workerExecutionErrorCode(err error) string {
+	var digestErr *ModuleDigestError
+	if errors.As(err, &digestErr) {
+		if digestErr.Reason == ModuleDigestErrorMismatch {
+			return "module_digest_mismatch"
+		}
+		return "module_digest_invalid"
+	}
+
+	return "execution_failed"
 }
 
 func (s *WorkerServer) metrics() *shared.Metrics {

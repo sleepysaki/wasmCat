@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -104,6 +105,13 @@ func TestWasmEngineRejectsMismatchedModuleDigest(t *testing.T) {
 	if !strings.Contains(err.Error(), "digest mismatch") {
 		t.Fatalf("expected digest mismatch error, got %v", err)
 	}
+	var digestErr *worker.ModuleDigestError
+	if !errors.As(err, &digestErr) {
+		t.Fatalf("expected ModuleDigestError, got %T", err)
+	}
+	if digestErr.Reason != worker.ModuleDigestErrorMismatch {
+		t.Fatalf("expected mismatch reason, got %q", digestErr.Reason)
+	}
 	if stats := engine.CacheStats(); stats.Entries != 0 {
 		t.Fatalf("expected mismatched module not to be cached, got %+v", stats)
 	}
@@ -125,6 +133,13 @@ func TestWasmEngineRejectsInvalidModuleDigestFormat(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported module digest") {
 		t.Fatalf("expected unsupported module digest error, got %v", err)
+	}
+	var digestErr *worker.ModuleDigestError
+	if !errors.As(err, &digestErr) {
+		t.Fatalf("expected ModuleDigestError, got %T", err)
+	}
+	if digestErr.Reason != worker.ModuleDigestErrorInvalid {
+		t.Fatalf("expected invalid reason, got %q", digestErr.Reason)
 	}
 }
 

@@ -57,3 +57,4 @@ Rejected request when digest is required:
 - Prefer immutable digest-pinned modules in production so reused names or tags cannot silently point to different code.
 - For ACR manifest tags such as `latest`, leave `REQUIRE_MODULE_DIGEST=false` or use a digest-pinned manifest/blob URL.
 - When `module_digest` is present, workers verify downloaded module bytes against the declared `sha256:<hex>` digest before compiling.
+- Digest failures are returned as stable worker error codes: `module_digest_invalid` for unsupported or malformed digest values, and `module_digest_mismatch` when downloaded bytes do not match the declared SHA-256 value.

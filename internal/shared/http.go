@@ -61,6 +61,10 @@ func PublicErrorMessage(code string) string {
 		return "Request ID was already used for different request content."
 	case "module_policy_violation":
 		return "Module source policy rejected the request."
+	case "module_digest_invalid":
+		return "Module digest is invalid."
+	case "module_digest_mismatch":
+		return "Module digest does not match downloaded content."
 	case "dispatch_failed":
 		return "Execution could not be dispatched."
 	case "execution_failed":

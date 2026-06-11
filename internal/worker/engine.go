@@ -22,6 +22,32 @@ type ModuleCacheKey struct {
 	Digest     string
 }
 
+const (
+	// ModuleDigestErrorInvalid means the request supplied a digest the worker cannot validate.
+	// Examples are unsupported algorithms, missing digest text, or non-hex SHA-256 values.
+	ModuleDigestErrorInvalid = "invalid"
+	// ModuleDigestErrorMismatch means the digest format is valid, but the downloaded module bytes differ.
+	// This is the important integrity failure: the worker did not compile or cache those bytes.
+	ModuleDigestErrorMismatch = "mismatch"
+)
+
+// ModuleDigestError carries the digest failure category from the engine to the HTTP layer.
+// The raw error text still keeps the detailed operator-facing reason for logs and tests.
+type ModuleDigestError struct {
+	Reason     string
+	ModuleName string
+	Digest     string
+	err        error
+}
+
+func (e *ModuleDigestError) Error() string {
+	return e.err.Error()
+}
+
+func (e *ModuleDigestError) Unwrap() error {
+	return e.err
+}
+
 func (k ModuleCacheKey) String() string {
 	if k.Digest != "" {
 		return k.ModuleName + "@digest:" + k.Digest
@@ -354,23 +380,32 @@ func verifyModuleDigest(moduleName string, wasmBytes []byte, moduleDigest string
 
 	algorithm, expectedDigest, ok := strings.Cut(moduleDigest, ":")
 	if !ok || algorithm != "sha256" || expectedDigest == "" {
-		return fmt.Errorf("unsupported module digest %q for %s", moduleDigest, moduleName)
+		return newModuleDigestError(ModuleDigestErrorInvalid, moduleName, moduleDigest, fmt.Errorf("unsupported module digest %q for %s", moduleDigest, moduleName))
 	}
 	expectedDigest = strings.ToLower(strings.TrimSpace(expectedDigest))
 	if len(expectedDigest) != sha256.Size*2 {
-		return fmt.Errorf("module digest %q for %s must be a sha256 hex digest", moduleDigest, moduleName)
+		return newModuleDigestError(ModuleDigestErrorInvalid, moduleName, moduleDigest, fmt.Errorf("module digest %q for %s must be a sha256 hex digest", moduleDigest, moduleName))
 	}
 	if _, err := hex.DecodeString(expectedDigest); err != nil {
-		return fmt.Errorf("module digest %q for %s must be valid hex: %w", moduleDigest, moduleName, err)
+		return newModuleDigestError(ModuleDigestErrorInvalid, moduleName, moduleDigest, fmt.Errorf("module digest %q for %s must be valid hex: %w", moduleDigest, moduleName, err))
 	}
 
 	actual := sha256.Sum256(wasmBytes)
 	actualDigest := hex.EncodeToString(actual[:])
 	if actualDigest != expectedDigest {
-		return fmt.Errorf("module %s digest mismatch: expected sha256:%s got sha256:%s", moduleName, expectedDigest, actualDigest)
+		return newModuleDigestError(ModuleDigestErrorMismatch, moduleName, moduleDigest, fmt.Errorf("module %s digest mismatch: expected sha256:%s got sha256:%s", moduleName, expectedDigest, actualDigest))
 	}
 
 	return nil
+}
+
+func newModuleDigestError(reason, moduleName, digest string, err error) *ModuleDigestError {
+	return &ModuleDigestError{
+		Reason:     reason,
+		ModuleName: moduleName,
+		Digest:     digest,
+		err:        err,
+	}
 }
 
 func (e *WasmEngine) cachedCompiledModule(cacheKey string, now time.Time) (wazero.CompiledModule, bool) {

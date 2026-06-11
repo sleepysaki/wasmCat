@@ -59,9 +59,9 @@ The core responsibility is to execute WASM modules on registered workers without
    - rewrites the request to the layer blob URL.
 6. The dispatcher reads schedulable workers from `Registry.GetSchedulableWorkers`.
 7. `Scheduler.SelectWorker` filters out workers below configured free CPU/RAM thresholds, then chooses the nearest remaining worker by latitude/longitude.
-8. `Dispatcher.forwardToWorker` sends the request, including `request_id`, to `https://<worker>/invoke` over mTLS. If the selected worker has a transport error or returns `502`, `503`, or `504`, the dispatcher removes that worker from the candidate list and selects another worker. It does not reschedule worker execution errors such as `400 execution_failed`.
-9. `WorkerServer.handleInvoke` limits request body size, decodes and validates the request, then calls `WasmEngine.Execute`.
-10. `WasmEngine.Execute` enforces payload and concurrency limits, fetches/compiles the module if needed, instantiates a fresh module instance, writes payload bytes into WASM memory, calls exported `run(ptr, len)`, reads output bytes, and returns a string.
+8. `Dispatcher.forwardToWorker` sends the request, including `request_id`, to `https://<worker>/invoke` over mTLS. If the selected worker has a transport error or returns `502`, `503`, or `504`, the dispatcher removes that worker from the candidate list and selects another worker. It does not reschedule worker execution errors such as `400 execution_failed`, `400 module_digest_invalid`, or `400 module_digest_mismatch`.
+9. `WorkerServer.handleInvoke` limits request body size, decodes and validates the request, then calls `WasmEngine.ExecuteWithDigest`.
+10. `WasmEngine.ExecuteWithDigest` enforces payload and concurrency limits, fetches/compiles the module if needed, verifies `module_digest` when supplied, instantiates a fresh module instance, writes payload bytes into WASM memory, calls exported `run(ptr, len)`, reads output bytes, and returns a string.
 11. Worker returns `shared.ExecutionResponse` with `request_id` and `execution_time_ms`; master fills `ExecutedOnNodeID` if needed, stores successful responses in the request tracker, and returns the response to the client.
 
 ## 2. Component & Module Breakdown
@@ -1002,7 +1002,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** Module name, downloaded WASM bytes, optional `sha256:<hex>` digest.
 - **Return Values:** Nil when no digest is supplied or when downloaded bytes match the digest.
-- **Error Handling:** Unsupported digest scheme, missing digest value, invalid hex length/content, or SHA-256 mismatch.
+- **Error Handling:** Unsupported digest scheme, missing digest value, invalid hex length/content, or SHA-256 mismatch. Digest failures are wrapped as `ModuleDigestError` so the worker API can return `module_digest_invalid` or `module_digest_mismatch` instead of a generic execution failure.
 - **Side Effects:** None.
 
 ##### `func (e *WasmEngine) CacheStats() ModuleCacheStats`
@@ -1189,7 +1189,7 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | Worker | `GET` | `/wasmcat/health` | none | `HealthResponse` | 405 wrong method, JSON encode failure only. |
 | Worker | `GET` | `/wasmcat/ready` | none | `HealthResponse` | 405 wrong method, 503 if engine is nil. |
 | Worker | `GET` | `/wasmcat/metrics` | none | `MetricsResponse` | 405 wrong method, JSON encode failure only. |
-| Worker | `POST` | `/invoke` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 503 if engine is nil, 400 invalid JSON/request/execution failure. |
+| Worker | `POST` | `/invoke` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 503 if engine is nil, 400 invalid JSON/request/execution failure, 400 invalid digest, 400 digest mismatch. |
 
 Wrong methods return JSON error code `method_not_allowed` and an `Allow` header with the required method.
 

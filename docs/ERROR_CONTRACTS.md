@@ -33,6 +33,8 @@ Handlers pass the real Go error to `shared.WriteError`. The function logs the ra
 | `request_in_progress` | `Execution request is already in progress.` |
 | `request_id_conflict` | `Request ID was already used for different request content.` |
 | `module_policy_violation` | `Module source policy rejected the request.` |
+| `module_digest_invalid` | `Module digest is invalid.` |
+| `module_digest_mismatch` | `Module digest does not match downloaded content.` |
 | `dispatch_failed` | `Execution could not be dispatched.` |
 | `execution_failed` | `WASM execution failed.` |
 | `not_ready` | `Service is not ready.` |
@@ -42,4 +44,4 @@ Unknown codes fall back to `Request failed.`
 
 ## Testing
 
-`tests/shared/error_contract_test.go` verifies that public errors do not contain internal details. Handler tests assert endpoint-specific codes and safe messages.
+`tests/shared/error_contract_test.go` verifies that public errors do not contain internal details. Handler tests assert endpoint-specific codes and safe messages, including worker module digest failures.
