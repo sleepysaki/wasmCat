@@ -41,6 +41,19 @@ func TestPublicErrorMessageFallsBackForUnknownCodes(t *testing.T) {
 	}
 }
 
+func TestPublicErrorMessageCoversRequestIdempotencyCodes(t *testing.T) {
+	tests := map[string]string{
+		"request_in_progress": "Execution request is already in progress.",
+		"request_id_conflict": "Request ID was already used for different request content.",
+	}
+
+	for code, expected := range tests {
+		if got := shared.PublicErrorMessage(code); got != expected {
+			t.Fatalf("expected %s message %q, got %q", code, expected, got)
+		}
+	}
+}
+
 func TestRequireMethodRejectsUnexpectedMethod(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/execute", nil)
 	rec := httptest.NewRecorder()

@@ -30,6 +30,7 @@ type Gateway struct {
 	Dispatcher *Dispatcher
 	CertDir    string
 	Metrics    *shared.Metrics
+	Requests   *ExecutionRequestTracker
 
 	// ExecuteClientIDs is optional. When empty, any trusted mTLS client can call
 	// /api/v1/execute. When set, the caller certificate must match one of these
@@ -38,6 +39,7 @@ type Gateway struct {
 
 	MaxExecuteBodyBytes int64
 	ModulePolicy        ModulePolicy
+	RequestCacheTTL     time.Duration
 	// How long the master waits for active HTTP requests after SIGINT/SIGTERM.
 	// This protects shutdown from hanging forever while still giving in-flight requests a chance to finish.
 	ShutdownTimeout time.Duration
@@ -297,14 +299,33 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 	req.RequestID = requestID
 
+	requestStatus, err := g.requests().Begin(req)
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+		return
+	}
+	switch requestStatus.Decision {
+	case ExecutionRequestCompleted:
+		shared.WriteJSON(w, http.StatusOK, requestStatus.Response)
+		return
+	case ExecutionRequestInFlight:
+		shared.WriteError(w, http.StatusConflict, "request_in_progress", fmt.Errorf("request_id %q is already running", req.RequestID))
+		return
+	case ExecutionRequestConflict:
+		shared.WriteError(w, http.StatusConflict, "request_id_conflict", fmt.Errorf("request_id %q was already used for a different execution request", req.RequestID))
+		return
+	}
+
 	// Tell the Dispatcher to find a worker and run the code
 	g.attachDispatcherMetrics()
 	result, err := g.Dispatcher.Dispatch(r.Context(), req)
 	if err != nil {
+		g.requests().Forget(req.RequestID)
 		g.metrics().IncDispatchFailure()
 		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", err)
 		return
 	}
+	g.requests().Complete(req.RequestID, result)
 	g.metrics().IncDispatchSuccess()
 
 	shared.WriteJSON(w, http.StatusOK, result)
@@ -316,6 +337,14 @@ func (g *Gateway) metrics() *shared.Metrics {
 	}
 
 	return g.Metrics
+}
+
+func (g *Gateway) requests() *ExecutionRequestTracker {
+	if g.Requests == nil {
+		g.Requests = NewExecutionRequestTracker(g.requestCacheTTL())
+	}
+
+	return g.Requests
 }
 
 func (g *Gateway) attachDispatcherMetrics() {
@@ -330,6 +359,14 @@ func (g *Gateway) maxExecuteBodyBytes() int64 {
 	}
 
 	return defaultMaxExecuteBodyBytes
+}
+
+func (g *Gateway) requestCacheTTL() time.Duration {
+	if g.RequestCacheTTL > 0 {
+		return g.RequestCacheTTL
+	}
+
+	return DefaultExecutionRequestCacheTTL
 }
 
 func limitRequestBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {

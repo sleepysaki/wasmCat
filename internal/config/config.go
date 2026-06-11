@@ -33,6 +33,7 @@ type MasterConfig struct {
 	MinWorkerRAMFreeMB  float64
 	ExecuteClientIDs    []string
 	MaxExecuteBodyBytes int64
+	RequestCacheTTL     time.Duration
 	ModuleHostAllowlist []string
 	RequireModuleDigest bool
 }
@@ -84,6 +85,10 @@ func LoadMaster() (MasterConfig, error) {
 	if err != nil {
 		return MasterConfig{}, err
 	}
+	requestCacheTTL, err := positiveDurationEnv("EXECUTION_REQUEST_CACHE_TTL", 5*time.Minute)
+	if err != nil {
+		return MasterConfig{}, err
+	}
 	requireModuleDigest, err := boolEnv("REQUIRE_MODULE_DIGEST", false)
 	if err != nil {
 		return MasterConfig{}, err
@@ -101,6 +106,7 @@ func LoadMaster() (MasterConfig, error) {
 		MinWorkerRAMFreeMB:  minWorkerRAMFreeMB,
 		ExecuteClientIDs:    listEnv("EXECUTE_CLIENT_ALLOWLIST"),
 		MaxExecuteBodyBytes: maxExecuteBodyBytes,
+		RequestCacheTTL:     requestCacheTTL,
 		ModuleHostAllowlist: listEnv("MODULE_HOST_ALLOWLIST"),
 		RequireModuleDigest: requireModuleDigest,
 	}

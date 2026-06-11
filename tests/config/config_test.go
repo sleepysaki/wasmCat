@@ -123,6 +123,15 @@ func TestLoadMasterRejectsInvalidMasterShutdownTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadMasterRejectsInvalidRequestCacheTTL(t *testing.T) {
+	t.Setenv("EXECUTION_REQUEST_CACHE_TTL", "not-a-duration")
+
+	_, err := config.LoadMaster()
+	if err == nil {
+		t.Fatal("expected invalid request cache ttl error")
+	}
+}
+
 func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	t.Setenv("CERT_DIR", "/etc/wasmcat/certs")
 	t.Setenv("AUTO_GENERATE_CERTS", "false")
@@ -133,6 +142,7 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	t.Setenv("MIN_WORKER_RAM_FREE_MB", "512")
 	t.Setenv("EXECUTE_CLIENT_ALLOWLIST", "wasmcat-client, deployer.internal ")
 	t.Setenv("MAX_EXECUTION_REQUEST_BYTES", "4096")
+	t.Setenv("EXECUTION_REQUEST_CACHE_TTL", "2m")
 	t.Setenv("MODULE_HOST_ALLOWLIST", "modules.internal, registry.azurecr.io ")
 	t.Setenv("REQUIRE_MODULE_DIGEST", "true")
 
@@ -167,6 +177,9 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	}
 	if cfg.MaxExecuteBodyBytes != 4096 {
 		t.Fatalf("expected max execute body bytes 4096, got %d", cfg.MaxExecuteBodyBytes)
+	}
+	if cfg.RequestCacheTTL != 2*time.Minute {
+		t.Fatalf("expected request cache ttl 2m, got %s", cfg.RequestCacheTTL)
 	}
 	if len(cfg.ModuleHostAllowlist) != 2 || cfg.ModuleHostAllowlist[0] != "modules.internal" || cfg.ModuleHostAllowlist[1] != "registry.azurecr.io" {
 		t.Fatalf("unexpected module host allowlist: %+v", cfg.ModuleHostAllowlist)

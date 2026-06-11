@@ -49,19 +49,20 @@ The core responsibility is to execute WASM modules on registered workers without
 
 1. Client sends JSON to `POST /api/v1/execute` on the master.
 2. `Gateway.handleExecute` decodes `shared.ExecutionRequest`, calls `ExecutionRequest.Validate`, applies module source policy, and preserves or creates `request_id`.
-3. `Dispatcher.Dispatch` normalizes module URL fields.
-4. If the URL points at `*.azurecr.io`, the dispatcher:
+3. The gateway checks `ExecutionRequestTracker`. New IDs are marked in-flight, matching completed IDs return cached responses, matching in-flight IDs return `409 request_in_progress`, and reused IDs with different request content return `409 request_id_conflict`.
+4. `Dispatcher.Dispatch` normalizes module URL fields.
+5. If the URL points at `*.azurecr.io`, the dispatcher:
    - parses the ACR reference,
    - gets a repository-scoped ACR bearer token from the master token cache,
    - fetches the OCI manifest for manifest URLs,
    - selects a WASM layer,
    - rewrites the request to the layer blob URL.
-5. The dispatcher reads schedulable workers from `Registry.GetSchedulableWorkers`.
-6. `Scheduler.SelectWorker` filters out workers below configured free CPU/RAM thresholds, then chooses the nearest remaining worker by latitude/longitude.
-7. `Dispatcher.forwardToWorker` sends the request, including `request_id`, to `https://<worker>/invoke` over mTLS. If the selected worker has a transport error or returns `502`, `503`, or `504`, the dispatcher removes that worker from the candidate list and selects another worker. It does not reschedule worker execution errors such as `400 execution_failed`.
-8. `WorkerServer.handleInvoke` limits request body size, decodes and validates the request, then calls `WasmEngine.Execute`.
-9. `WasmEngine.Execute` enforces payload and concurrency limits, fetches/compiles the module if needed, instantiates a fresh module instance, writes payload bytes into WASM memory, calls exported `run(ptr, len)`, reads output bytes, and returns a string.
-10. Worker returns `shared.ExecutionResponse` with `request_id` and `execution_time_ms`; master fills `ExecutedOnNodeID` if needed and returns it to the client.
+6. The dispatcher reads schedulable workers from `Registry.GetSchedulableWorkers`.
+7. `Scheduler.SelectWorker` filters out workers below configured free CPU/RAM thresholds, then chooses the nearest remaining worker by latitude/longitude.
+8. `Dispatcher.forwardToWorker` sends the request, including `request_id`, to `https://<worker>/invoke` over mTLS. If the selected worker has a transport error or returns `502`, `503`, or `504`, the dispatcher removes that worker from the candidate list and selects another worker. It does not reschedule worker execution errors such as `400 execution_failed`.
+9. `WorkerServer.handleInvoke` limits request body size, decodes and validates the request, then calls `WasmEngine.Execute`.
+10. `WasmEngine.Execute` enforces payload and concurrency limits, fetches/compiles the module if needed, instantiates a fresh module instance, writes payload bytes into WASM memory, calls exported `run(ptr, len)`, reads output bytes, and returns a string.
+11. Worker returns `shared.ExecutionResponse` with `request_id` and `execution_time_ms`; master fills `ExecutedOnNodeID` if needed, stores successful responses in the request tracker, and returns the response to the client.
 
 ## 2. Component & Module Breakdown
 
@@ -134,8 +135,14 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/master/gateway.go`
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
-- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, optional `Gateway.ExecuteClientIDs`, module source policy, request body limit, and graceful shutdown timeout.
-- **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain, validates execution client certificate identity when configured, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
+- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, `Gateway.Requests`, optional `Gateway.ExecuteClientIDs`, module source policy, request body limit, request cache TTL, and graceful shutdown timeout.
+- **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain, validates execution client certificate identity when configured, checks request idempotency state, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
+
+### `internal/master/request_tracker.go`
+
+- **Name & Responsibility:** Provides process-local idempotency tracking for `/api/v1/execute` requests.
+- **State & Properties:** Mutex-protected map keyed by `request_id`, request fingerprints, in-flight/completed state, cached successful `ExecutionResponse`, TTL, and clock function.
+- **Interactions:** `Gateway.handleExecute` calls `Begin`, `Complete`, and `Forget` to reject concurrent duplicates, return cached successes, detect request ID conflicts, and allow retries after dispatch failures.
 
 ### `internal/master/registry.go`
 
@@ -340,7 +347,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** None.
 - **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `WorkerStaleTimeout`, `ShutdownTimeout`, `MinWorkerCPUFree`, `MinWorkerRAMFreeMB`, `ModuleHostAllowlist`, and `RequireModuleDigest`.
-- **Error Handling:** Invalid or non-positive `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, or `MAX_EXECUTION_REQUEST_BYTES`; invalid `AUTO_GENERATE_CERTS` or `REQUIRE_MODULE_DIGEST`; `MIN_WORKER_CPU_FREE` outside `0..100`; negative `MIN_WORKER_RAM_FREE_MB`.
+- **Error Handling:** Invalid or non-positive `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, `EXECUTION_REQUEST_CACHE_TTL`, or `MAX_EXECUTION_REQUEST_BYTES`; invalid `AUTO_GENERATE_CERTS` or `REQUIRE_MODULE_DIGEST`; `MIN_WORKER_CPU_FREE` outside `0..100`; negative `MIN_WORKER_RAM_FREE_MB`.
 - **Side Effects:** Reads process environment.
 
 ##### `func LoadWorker() (WorkerConfig, error)`
@@ -763,6 +770,34 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Error Handling:** None.
 - **Side Effects:** None.
 
+##### `func NewExecutionRequestTracker(ttl time.Duration) *ExecutionRequestTracker`
+
+- **Parameters:** `ttl` controls how long completed successful responses remain cached. Non-positive values use `DefaultExecutionRequestCacheTTL`.
+- **Return Values:** Request tracker with an empty map, TTL, and `time.Now` clock.
+- **Error Handling:** None.
+- **Side Effects:** None.
+
+##### `func (t *ExecutionRequestTracker) Begin(req shared.ExecutionRequest) (ExecutionRequestStatus, error)`
+
+- **Parameters:** Execution request with normalized `RequestID`.
+- **Return Values:** Decision `ExecutionRequestStarted`, `ExecutionRequestInFlight`, `ExecutionRequestCompleted`, or `ExecutionRequestConflict`; cached response is included for completed duplicates.
+- **Error Handling:** Returns fingerprinting errors if the request identity cannot be marshaled.
+- **Side Effects:** Locks the tracker, removes expired completed entries, and may insert a new in-flight entry.
+
+##### `func (t *ExecutionRequestTracker) Complete(requestID string, response shared.ExecutionResponse)`
+
+- **Parameters:** Request ID and successful worker response.
+- **Return Values:** None.
+- **Error Handling:** None.
+- **Side Effects:** Converts an in-flight entry into a completed cached response.
+
+##### `func (t *ExecutionRequestTracker) Forget(requestID string)`
+
+- **Parameters:** Request ID to remove.
+- **Return Values:** None.
+- **Error Handling:** None.
+- **Side Effects:** Deletes request tracking state so failed dispatches can be retried.
+
 ### ACR functions
 
 ##### `func ParseACRModuleReference(moduleRegistryURL string) (ACRReference, error)`
@@ -1057,6 +1092,7 @@ The core responsibility is to execute WASM modules on registered workers without
 | `MIN_WORKER_RAM_FREE_MB` | `0` | float MiB | Minimum reported free RAM required before the scheduler can select a worker. |
 | `EXECUTE_CLIENT_ALLOWLIST` | empty | comma-separated certificate identities | Optional client certificate CN or DNS SAN allowlist for `/api/v1/execute`. Empty allows any trusted mTLS client. |
 | `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | integer bytes | Maximum JSON body size accepted by master `/api/v1/execute`. |
+| `EXECUTION_REQUEST_CACHE_TTL` | `5m` | Go duration | How long successful execution responses remain cached by `request_id`. |
 | `MODULE_HOST_ALLOWLIST` | empty | comma-separated hosts | Optional module URL host allowlist for `/api/v1/execute`. Empty allows any host. |
 | `REQUIRE_MODULE_DIGEST` | `false` | Go boolean string | When true, execution requests must include `module_digest` or use a digest-pinned OCI manifest/blob URL. |
 
@@ -1127,7 +1163,7 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | Master | `POST` | `/internal/register` | `WorkerNode` | `APIResponse` | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch. |
 | Master | `POST` | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
 | Master | `POST` | `/internal/drain` | `DrainRequest` | `APIResponse` | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
-| Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 413 body too large, 403 unauthorized execution client, 403 module policy violation, 400 invalid JSON/request, 503 dispatch failure. |
+| Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 413 body too large, 403 unauthorized execution client, 403 module policy violation, 409 duplicate/conflicting request ID, 400 invalid JSON/request, 503 dispatch failure. |
 | Worker | `GET` | `/wasmcat/health` | none | `HealthResponse` | 405 wrong method, JSON encode failure only. |
 | Worker | `GET` | `/wasmcat/ready` | none | `HealthResponse` | 405 wrong method, 503 if engine is nil. |
 | Worker | `GET` | `/wasmcat/metrics` | none | `MetricsResponse` | 405 wrong method, JSON encode failure only. |
@@ -1198,11 +1234,12 @@ output_len = uint32(result)
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
 - **Cold fetch coalescing is process-local:** Concurrent cold requests for the same cache key share one download/compile inside a worker process. Separate workers still compile independently.
-- **Request IDs are correlation only:** `request_id` is generated or propagated for tracing. It is not stored and does not provide idempotency.
+- **Request idempotency is process-local:** `request_id` prevents concurrent duplicate dispatch and caches successful responses for `EXECUTION_REQUEST_CACHE_TTL`, but the cache is in memory and is cleared on master restart.
 - **Health/readiness require mTLS:** Because TLS client auth is configured at server level, probes must present valid client certificates unless TLS routing changes.
 - **Development cert generation overwrites at runtime:** `GenerateCAAndCerts` uses `os.Create`. Production should set `AUTO_GENERATE_CERTS=false`; bootstrap protects generated files unless `--force` is used.
 - **Telemetry is host-level, not cgroup-level:** gopsutil reports host CPU and memory. It does not currently account for per-service cgroup quotas.
 - **No persistent state:** Registry and module cache are in memory. Master restart loses worker registry; worker restart loses compiled module cache.
+- **No durable request ledger:** Master restart also loses completed request ID history. Multiple master instances do not share idempotency state.
 - **Execution authorization allowlist is optional:** If `EXECUTE_CLIENT_ALLOWLIST` is empty, any valid client certificate trusted by the CA can call `/api/v1/execute`.
 - **Module source policy is optional:** If `MODULE_HOST_ALLOWLIST` is empty and `REQUIRE_MODULE_DIGEST=false`, trusted execution clients can submit any HTTP(S) module URL.
 - **WASM ABI is narrow:** Modules must match the exact `memory`, `malloc`, and packed `run` ABI. WASI modules or modules with different host imports are not supported by the current engine path.

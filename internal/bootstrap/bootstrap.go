@@ -22,6 +22,7 @@ type MasterOptions struct {
 	MinWorkerRAMFreeMB  float64
 	ExecuteClientIDs    string
 	MaxExecuteBodyBytes int64
+	RequestCacheTTL     string
 	ModuleHostAllowlist string
 	RequireModuleDigest bool
 	DevWorkerID         string
@@ -93,6 +94,7 @@ func InitMaster(options MasterOptions) (Result, error) {
 		{"MIN_WORKER_RAM_FREE_MB", strconv.FormatFloat(options.MinWorkerRAMFreeMB, 'f', -1, 64)},
 		{"EXECUTE_CLIENT_ALLOWLIST", options.ExecuteClientIDs},
 		{"MAX_EXECUTION_REQUEST_BYTES", strconv.FormatInt(options.MaxExecuteBodyBytes, 10)},
+		{"EXECUTION_REQUEST_CACHE_TTL", options.RequestCacheTTL},
 		{"MODULE_HOST_ALLOWLIST", options.ModuleHostAllowlist},
 		{"REQUIRE_MODULE_DIGEST", strconv.FormatBool(options.RequireModuleDigest)},
 	}
@@ -169,6 +171,9 @@ func normalizeMaster(options MasterOptions) MasterOptions {
 	}
 	if options.ShutdownTimeout == "" {
 		options.ShutdownTimeout = "5s"
+	}
+	if options.RequestCacheTTL == "" {
+		options.RequestCacheTTL = "5m"
 	}
 	if options.DevWorkerID == "" {
 		options.DevWorkerID = "worker-vn-01"
@@ -248,6 +253,9 @@ func validateMaster(options MasterOptions) error {
 	}
 	if options.MaxExecuteBodyBytes <= 0 {
 		return fmt.Errorf("max execution request bytes must be greater than zero")
+	}
+	if err := validatePositiveDuration("execution request cache ttl", options.RequestCacheTTL); err != nil {
+		return fmt.Errorf("parse execution request cache ttl: %w", err)
 	}
 
 	return nil

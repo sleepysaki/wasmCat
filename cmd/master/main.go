@@ -72,6 +72,7 @@ func main() {
 		Metrics:             metrics,
 		ExecuteClientIDs:    cfg.ExecuteClientIDs,
 		MaxExecuteBodyBytes: cfg.MaxExecuteBodyBytes,
+		RequestCacheTTL:     cfg.RequestCacheTTL,
 		ModulePolicy: master.ModulePolicy{
 			AllowedHosts:  cfg.ModuleHostAllowlist,
 			RequireDigest: cfg.RequireModuleDigest,
@@ -136,6 +137,7 @@ func runInit(args []string) error {
 	minWorkerRAMFreeMB := flags.Float64("min-worker-ram-free-mb", 0, "minimum free RAM in MiB required for scheduling")
 	executeClientAllowlist := flags.String("execute-client-allowlist", "", "comma-separated client certificate CN or DNS SAN values allowed to call /api/v1/execute")
 	maxExecuteBodyBytes := flags.Int64("max-execution-request-bytes", 2<<20, "maximum JSON body size accepted by /api/v1/execute")
+	requestCacheTTL := flags.String("execution-request-cache-ttl", "5m", "how long successful request_id responses are cached for duplicate requests")
 	moduleHostAllowlist := flags.String("module-host-allowlist", "", "comma-separated module URL hosts allowed by the master; empty allows any host")
 	requireModuleDigest := flags.Bool("require-module-digest", false, "require execution requests to include a module digest or digest-pinned OCI URL")
 	devWorkerID := flags.String("dev-worker-id", "worker-vn-01", "worker ID used when generating development certificates")
@@ -157,6 +159,7 @@ func runInit(args []string) error {
 		MinWorkerRAMFreeMB:  *minWorkerRAMFreeMB,
 		ExecuteClientIDs:    *executeClientAllowlist,
 		MaxExecuteBodyBytes: *maxExecuteBodyBytes,
+		RequestCacheTTL:     *requestCacheTTL,
 		ModuleHostAllowlist: *moduleHostAllowlist,
 		RequireModuleDigest: *requireModuleDigest,
 		DevWorkerID:         *devWorkerID,
