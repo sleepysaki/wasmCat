@@ -32,6 +32,8 @@ The `master` object contains:
 | `oldest_heartbeat_seconds` | Age of the oldest non-zero worker heartbeat. Omitted when no heartbeat is known. |
 | `dispatch_success` | Successful `/api/v1/execute` dispatches. |
 | `dispatch_failure` | Failed `/api/v1/execute` dispatches. |
+| `dispatch_reschedules` | Number of times the dispatcher recovered from a retryable selected-worker failure by trying another worker. |
+| `dispatch_reschedule_exhausted` | Number of requests where retryable selected-worker failures consumed all available worker candidates. |
 
 ## Worker Fields
 
@@ -49,3 +51,5 @@ The `worker` object contains:
 ## Notes
 
 The current format is JSON for simplicity and zero dependencies. It is suitable for smoke checks, custom probes, and early dashboards. A Prometheus text endpoint can be added later without replacing this endpoint.
+
+High `dispatch_reschedules` means workers are becoming unavailable after registration but before execution. High `dispatch_reschedule_exhausted` means the master is running out of healthy execution capacity for at least some requests.

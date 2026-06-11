@@ -104,6 +104,7 @@ func TestDispatcherRetriesRetryableWorkerFailureOnAnotherWorker(t *testing.T) {
 			Longitude: 10,
 		},
 	})
+	dispatcher.Metrics = shared.NewMetrics()
 
 	resp, err := dispatcher.Dispatch(context.Background(), shared.ExecutionRequest{
 		ModuleName: "echo",
@@ -122,6 +123,13 @@ func TestDispatcherRetriesRetryableWorkerFailureOnAnotherWorker(t *testing.T) {
 	}
 	if atomic.LoadInt32(&healthyWorkerHits) != 1 {
 		t.Fatalf("expected one healthy worker hit, got %d", healthyWorkerHits)
+	}
+	metrics := dispatcher.Metrics.MasterSnapshot(0, nil, nil)
+	if metrics.Master == nil || metrics.Master.DispatchReschedules != 1 {
+		t.Fatalf("expected one dispatch reschedule, got %+v", metrics.Master)
+	}
+	if metrics.Master.DispatchRescheduleExhausted != 0 {
+		t.Fatalf("expected no exhausted reschedules, got %+v", metrics.Master)
 	}
 }
 
@@ -155,6 +163,7 @@ func TestDispatcherDoesNotRetryWorkerExecutionFailure(t *testing.T) {
 			Longitude: 10,
 		},
 	})
+	dispatcher.Metrics = shared.NewMetrics()
 
 	_, err := dispatcher.Dispatch(context.Background(), shared.ExecutionRequest{
 		ModuleName: "echo",
@@ -173,6 +182,66 @@ func TestDispatcherDoesNotRetryWorkerExecutionFailure(t *testing.T) {
 	}
 	if atomic.LoadInt32(&healthyWorkerHits) != 0 {
 		t.Fatalf("expected healthy worker not to be hit, got %d", healthyWorkerHits)
+	}
+	metrics := dispatcher.Metrics.MasterSnapshot(0, nil, nil)
+	if metrics.Master == nil || metrics.Master.DispatchReschedules != 0 {
+		t.Fatalf("expected no dispatch reschedule for execution failure, got %+v", metrics.Master)
+	}
+}
+
+func TestDispatcherCountsExhaustedRetryableReschedule(t *testing.T) {
+	var firstWorkerHits int32
+	var secondWorkerHits int32
+
+	firstWorker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&firstWorkerHits, 1)
+		shared.WriteError(w, http.StatusServiceUnavailable, "worker_unavailable", assertErr("temporary outage"))
+	}))
+	defer firstWorker.Close()
+
+	secondWorker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&secondWorkerHits, 1)
+		shared.WriteError(w, http.StatusBadGateway, "worker_failed", assertErr("still unavailable"))
+	}))
+	defer secondWorker.Close()
+
+	dispatcher := newMultiWorkerDispatcher([]shared.WorkerNode{
+		{
+			ID:        "worker-first",
+			IPAddress: firstWorker.URL,
+			Latitude:  0,
+			Longitude: 0,
+		},
+		{
+			ID:        "worker-second",
+			IPAddress: secondWorker.URL,
+			Latitude:  10,
+			Longitude: 10,
+		},
+	})
+	dispatcher.Metrics = shared.NewMetrics()
+
+	_, err := dispatcher.Dispatch(context.Background(), shared.ExecutionRequest{
+		ModuleName: "echo",
+		ModuleURL:  "http://module.test/echo.wasm",
+		UserLat:    0,
+		UserLon:    0,
+	})
+	if err == nil {
+		t.Fatal("expected exhausted retryable dispatch failure")
+	}
+	if atomic.LoadInt32(&firstWorkerHits) != 1 {
+		t.Fatalf("expected one first worker hit, got %d", firstWorkerHits)
+	}
+	if atomic.LoadInt32(&secondWorkerHits) != 1 {
+		t.Fatalf("expected one second worker hit, got %d", secondWorkerHits)
+	}
+	metrics := dispatcher.Metrics.MasterSnapshot(0, nil, nil)
+	if metrics.Master == nil || metrics.Master.DispatchReschedules != 1 {
+		t.Fatalf("expected one dispatch reschedule, got %+v", metrics.Master)
+	}
+	if metrics.Master.DispatchRescheduleExhausted != 1 {
+		t.Fatalf("expected one exhausted reschedule, got %+v", metrics.Master)
 	}
 }
 

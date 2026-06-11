@@ -115,9 +115,9 @@ The core responsibility is to execute WASM modules on registered workers without
 
 ### `internal/shared/metrics.go`
 
-- **Name & Responsibility:** Tracks process-local request, dispatch, execution, and cache/worker metrics.
-- **State & Properties:** Mutex-protected counters, start time, request counts by status/path, dispatch counters, and worker execution counters.
-- **Interactions:** Logging middleware records request metrics; master and worker metrics endpoints expose snapshots.
+- **Name & Responsibility:** Tracks process-local request, dispatch, execution, cache, and worker metrics.
+- **State & Properties:** Mutex-protected counters, start time, request counts by status/path, dispatch success/failure counters, dispatch reschedule counters, and worker execution counters.
+- **Interactions:** Logging middleware records request metrics; dispatcher records conservative reschedules; master and worker metrics endpoints expose snapshots.
 
 ### `internal/shared/client.go`
 
@@ -152,7 +152,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/master/dispatcher.go`
 
 - **Name & Responsibility:** Coordinates execution dispatch from master to selected worker, including conservative alternate-worker rescheduling for transient selected-worker failures.
-- **State & Properties:** `Registry`, `Scheduler`, optional injected `Client`, and `CertDir`.
+- **State & Properties:** `Registry`, `Scheduler`, optional injected `Client`, `CertDir`, and optional shared `Metrics` collector.
 - **Interactions:** Reads registry, calls scheduler, calls ACR helpers, creates mTLS client, forwards to worker `/invoke`, and removes failed retryable candidates before selecting another worker.
 
 ### `internal/master/acr_manifest.go`

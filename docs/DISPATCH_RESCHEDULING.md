@@ -44,4 +44,6 @@ Rescheduling is per request and process-local. It does not persist job state, ma
 
 - Keep worker heartbeat and stale-timeout settings tight enough that dead workers leave the registry quickly.
 - Use `request_id` for tracing rescheduled attempts across logs.
+- Watch `master.dispatch_reschedules` to spot workers that fail after being selected.
+- Watch `master.dispatch_reschedule_exhausted` to spot requests that had no remaining usable worker after retryable failures.
 - Treat this feature as availability hardening, not durable job retry. Durable execution would require persisted request state and idempotency controls.

@@ -22,6 +22,7 @@ type Dispatcher struct {
 	Scheduler *Scheduler
 	Client    *http.Client
 	CertDir   string
+	Metrics   *shared.Metrics
 }
 
 // workerDispatchError marks whether a worker forwarding failure is safe enough
@@ -126,6 +127,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) 
 		if len(candidates) == 0 {
 			break
 		}
+		d.Metrics.IncDispatchReschedule()
 
 		slog.Warn("dispatch attempt failed, trying another worker",
 			"request_id", req.RequestID,
@@ -144,6 +146,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req shared.ExecutionRequest) 
 		"duration_ms", time.Since(start).Milliseconds(),
 		"error", lastErr,
 	)
+	d.Metrics.IncDispatchRescheduleExhausted()
 	return shared.ExecutionResponse{}, lastErr
 }
 

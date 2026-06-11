@@ -15,6 +15,7 @@ import (
 	"wasmcat/internal/logging"
 	"wasmcat/internal/master"
 	"wasmcat/internal/security"
+	"wasmcat/internal/shared"
 )
 
 func main() {
@@ -52,11 +53,14 @@ func main() {
 	}
 	slog.Info("capacity-aware scheduler initialized", "min_cpu_free", cfg.MinWorkerCPUFree, "min_ram_free_mb", cfg.MinWorkerRAMFreeMB)
 
+	metrics := shared.NewMetrics()
+
 	// Create the Dispatcher, need both the Registry and the Scheduler
 	dispatch := &master.Dispatcher{
 		Registry:  reg,
 		Scheduler: sched,
 		CertDir:   cfg.CertDir,
+		Metrics:   metrics,
 	}
 	slog.Info("execution dispatcher initialized")
 
@@ -65,6 +69,7 @@ func main() {
 		Registry:            reg,
 		Dispatcher:          dispatch,
 		CertDir:             cfg.CertDir,
+		Metrics:             metrics,
 		ExecuteClientIDs:    cfg.ExecuteClientIDs,
 		MaxExecuteBodyBytes: cfg.MaxExecuteBodyBytes,
 		ModulePolicy: master.ModulePolicy{

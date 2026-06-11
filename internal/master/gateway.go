@@ -95,6 +95,7 @@ func (g *Gateway) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if !shared.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
+	g.attachDispatcherMetrics()
 
 	activeWorkers := 0
 	workersByState := map[string]int{}
@@ -297,6 +298,7 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	req.RequestID = requestID
 
 	// Tell the Dispatcher to find a worker and run the code
+	g.attachDispatcherMetrics()
 	result, err := g.Dispatcher.Dispatch(r.Context(), req)
 	if err != nil {
 		g.metrics().IncDispatchFailure()
@@ -314,6 +316,12 @@ func (g *Gateway) metrics() *shared.Metrics {
 	}
 
 	return g.Metrics
+}
+
+func (g *Gateway) attachDispatcherMetrics() {
+	if g.Dispatcher != nil && g.Dispatcher.Metrics == nil {
+		g.Dispatcher.Metrics = g.metrics()
+	}
 }
 
 func (g *Gateway) maxExecuteBodyBytes() int64 {

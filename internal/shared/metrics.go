@@ -17,6 +17,11 @@ type Metrics struct {
 
 	dispatchSuccess uint64
 	dispatchFailure uint64
+	// dispatchReschedules counts times the master had to move an execution request
+	// from one selected worker to another after a retryable forwarding failure.
+	dispatchReschedules uint64
+	// dispatchRescheduleExhausted counts requests where every retryable worker candidate failed.
+	dispatchRescheduleExhausted uint64
 
 	workerExecutionSuccess uint64
 	workerExecutionFailure uint64
@@ -39,6 +44,12 @@ type MasterMetrics struct {
 	OldestHeartbeatS *int64         `json:"oldest_heartbeat_seconds,omitempty"`
 	DispatchSuccess  uint64         `json:"dispatch_success"`
 	DispatchFailure  uint64         `json:"dispatch_failure"`
+	// DispatchReschedules is an availability signal: it means the dispatcher recovered
+	// from one selected-worker failure by trying another candidate.
+	DispatchReschedules uint64 `json:"dispatch_reschedules"`
+	// DispatchRescheduleExhausted means a request only saw retryable failures, but no
+	// remaining schedulable worker could complete it.
+	DispatchRescheduleExhausted uint64 `json:"dispatch_reschedule_exhausted"`
 }
 
 type WorkerMetrics struct {
@@ -95,6 +106,26 @@ func (m *Metrics) IncDispatchFailure() {
 	m.dispatchFailure++
 }
 
+func (m *Metrics) IncDispatchReschedule() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dispatchReschedules++
+}
+
+func (m *Metrics) IncDispatchRescheduleExhausted() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dispatchRescheduleExhausted++
+}
+
 func (m *Metrics) IncWorkerExecutionSuccess() {
 	if m == nil {
 		return
@@ -139,11 +170,13 @@ func (m *Metrics) MasterSnapshot(activeWorkers int, workersByState map[string]in
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	response.Master = &MasterMetrics{
-		ActiveWorkers:    activeWorkers,
-		WorkersByState:   workersByState,
-		OldestHeartbeatS: oldestHeartbeatSeconds,
-		DispatchSuccess:  m.dispatchSuccess,
-		DispatchFailure:  m.dispatchFailure,
+		ActiveWorkers:               activeWorkers,
+		WorkersByState:              workersByState,
+		OldestHeartbeatS:            oldestHeartbeatSeconds,
+		DispatchSuccess:             m.dispatchSuccess,
+		DispatchFailure:             m.dispatchFailure,
+		DispatchReschedules:         m.dispatchReschedules,
+		DispatchRescheduleExhausted: m.dispatchRescheduleExhausted,
 	}
 
 	return response
