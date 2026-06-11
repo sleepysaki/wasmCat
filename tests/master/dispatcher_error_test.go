@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"wasmcat/internal/master"
 	"wasmcat/internal/shared"
@@ -70,6 +71,108 @@ func TestDispatcherSetsExecutedOnNodeID(t *testing.T) {
 	}
 	if resp.RequestID != "req-test-dispatch" {
 		t.Fatalf("expected request id fallback, got %q", resp.RequestID)
+	}
+}
+
+func TestDispatcherRetriesRetryableWorkerFailureOnAnotherWorker(t *testing.T) {
+	var failedWorkerHits int32
+	var healthyWorkerHits int32
+
+	failedWorker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&failedWorkerHits, 1)
+		shared.WriteError(w, http.StatusServiceUnavailable, "worker_unavailable", assertErr("temporary outage"))
+	}))
+	defer failedWorker.Close()
+
+	healthyWorker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&healthyWorkerHits, 1)
+		shared.WriteJSON(w, http.StatusOK, shared.ExecutionResponse{Result: "ok"})
+	}))
+	defer healthyWorker.Close()
+
+	dispatcher := newMultiWorkerDispatcher([]shared.WorkerNode{
+		{
+			ID:        "worker-unavailable",
+			IPAddress: failedWorker.URL,
+			Latitude:  0,
+			Longitude: 0,
+		},
+		{
+			ID:        "worker-healthy",
+			IPAddress: healthyWorker.URL,
+			Latitude:  10,
+			Longitude: 10,
+		},
+	})
+
+	resp, err := dispatcher.Dispatch(context.Background(), shared.ExecutionRequest{
+		ModuleName: "echo",
+		ModuleURL:  "http://module.test/echo.wasm",
+		UserLat:    0,
+		UserLon:    0,
+	})
+	if err != nil {
+		t.Fatalf("Dispatch returned error: %v", err)
+	}
+	if resp.ExecutedOnNodeID != "worker-healthy" {
+		t.Fatalf("expected retry to execute on worker-healthy, got %q", resp.ExecutedOnNodeID)
+	}
+	if atomic.LoadInt32(&failedWorkerHits) != 1 {
+		t.Fatalf("expected one failed worker hit, got %d", failedWorkerHits)
+	}
+	if atomic.LoadInt32(&healthyWorkerHits) != 1 {
+		t.Fatalf("expected one healthy worker hit, got %d", healthyWorkerHits)
+	}
+}
+
+func TestDispatcherDoesNotRetryWorkerExecutionFailure(t *testing.T) {
+	var failedWorkerHits int32
+	var healthyWorkerHits int32
+
+	failedWorker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&failedWorkerHits, 1)
+		shared.WriteError(w, http.StatusBadRequest, "execution_failed", assertErr("module rejected payload"))
+	}))
+	defer failedWorker.Close()
+
+	healthyWorker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&healthyWorkerHits, 1)
+		shared.WriteJSON(w, http.StatusOK, shared.ExecutionResponse{Result: "unexpected"})
+	}))
+	defer healthyWorker.Close()
+
+	dispatcher := newMultiWorkerDispatcher([]shared.WorkerNode{
+		{
+			ID:        "worker-execution-error",
+			IPAddress: failedWorker.URL,
+			Latitude:  0,
+			Longitude: 0,
+		},
+		{
+			ID:        "worker-healthy",
+			IPAddress: healthyWorker.URL,
+			Latitude:  10,
+			Longitude: 10,
+		},
+	})
+
+	_, err := dispatcher.Dispatch(context.Background(), shared.ExecutionRequest{
+		ModuleName: "echo",
+		ModuleURL:  "http://module.test/echo.wasm",
+		UserLat:    0,
+		UserLon:    0,
+	})
+	if err == nil {
+		t.Fatal("expected execution failure")
+	}
+	if !strings.Contains(err.Error(), "400 Bad Request") {
+		t.Fatalf("expected original worker error, got %v", err)
+	}
+	if atomic.LoadInt32(&failedWorkerHits) != 1 {
+		t.Fatalf("expected one failed worker hit, got %d", failedWorkerHits)
+	}
+	if atomic.LoadInt32(&healthyWorkerHits) != 0 {
+		t.Fatalf("expected healthy worker not to be hit, got %d", healthyWorkerHits)
 	}
 }
 
@@ -196,6 +299,19 @@ func newTestDispatcher(workerURL string) *master.Dispatcher {
 		ID:        "worker-test",
 		IPAddress: workerURL,
 	})
+
+	return &master.Dispatcher{
+		Registry:  registry,
+		Scheduler: &master.Scheduler{},
+		Client:    http.DefaultClient,
+	}
+}
+
+func newMultiWorkerDispatcher(workers []shared.WorkerNode) *master.Dispatcher {
+	registry := master.NewRegistry()
+	for _, worker := range workers {
+		registry.RegisterWorker(worker)
+	}
 
 	return &master.Dispatcher{
 		Registry:  registry,

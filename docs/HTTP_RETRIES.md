@@ -10,7 +10,7 @@ wasmCat uses bounded retries for outbound HTTP calls that are safe to repeat. Th
 - Worker module downloads.
 - Worker registration, heartbeat, and drain telemetry calls.
 
-Master-to-worker `/invoke` dispatch is intentionally not retried. A failed response from that path is ambiguous: the worker may already have executed the module before the connection failed. Retrying could run the same request twice.
+Master-to-worker `/invoke` dispatch does not use the shared same-request retry helper. A failed response from that path is ambiguous: the worker may already have executed the module before the connection failed. Instead, the dispatcher uses a narrower rescheduling rule: it may try another worker only after a transport error or worker `502`/`503`/`504`, and it does not reschedule execution errors such as `400 execution_failed`.
 
 ## Defaults
 
@@ -33,3 +33,4 @@ If a request body cannot be replayed, the helper returns an error instead of sen
 - Retry failures are still surfaced to the caller after attempts are exhausted.
 - Final retryable HTTP responses are returned to the caller so existing status-specific error handling still runs.
 - The policy is intentionally small. Longer retry loops belong in higher-level controllers or external supervisors, not inside a single request path.
+- Dispatcher rescheduling is documented separately in `docs/DISPATCH_RESCHEDULING.md` because it selects a different worker instead of replaying one HTTP request through `DoWithRetry`.

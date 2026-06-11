@@ -12,7 +12,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Master-worker architecture:** `cmd/master` runs the control plane. `cmd/worker` runs execution nodes.
 - **Control plane/data plane split:** Master APIs handle registration, scheduling, and dispatch. Worker APIs handle module invocation.
-- **Coordinator pattern:** `master.Dispatcher` coordinates registry lookup, ACR resolution, worker selection, and mTLS forwarding.
+- **Coordinator pattern:** `master.Dispatcher` coordinates registry lookup, ACR resolution, worker selection, conservative rescheduling, and mTLS forwarding.
 - **Strategy-like scheduling:** `master.Scheduler` isolates worker selection logic. The current strategy filters workers below configured CPU/RAM thresholds, then chooses the nearest eligible worker using Haversine distance.
 - **Dependency injection:** `Gateway`, `Dispatcher`, and `WorkerServer` receive dependencies as struct fields, which also makes handler tests possible.
 - **In-memory registry/cache:** Worker state is held in `Registry.workers`; compiled modules are held in `WasmEngine.cache`.
@@ -56,9 +56,9 @@ The core responsibility is to execute WASM modules on registered workers without
    - fetches the OCI manifest for manifest URLs,
    - selects a WASM layer,
    - rewrites the request to the layer blob URL.
-5. The dispatcher reads active workers from `Registry.GetActiveWorkers`.
+5. The dispatcher reads schedulable workers from `Registry.GetSchedulableWorkers`.
 6. `Scheduler.SelectWorker` filters out workers below configured free CPU/RAM thresholds, then chooses the nearest remaining worker by latitude/longitude.
-7. `Dispatcher.forwardToWorker` sends the request, including `request_id`, to `https://<worker>/invoke` over mTLS.
+7. `Dispatcher.forwardToWorker` sends the request, including `request_id`, to `https://<worker>/invoke` over mTLS. If the selected worker has a transport error or returns `502`, `503`, or `504`, the dispatcher removes that worker from the candidate list and selects another worker. It does not reschedule worker execution errors such as `400 execution_failed`.
 8. `WorkerServer.handleInvoke` limits request body size, decodes and validates the request, then calls `WasmEngine.Execute`.
 9. `WasmEngine.Execute` enforces payload and concurrency limits, fetches/compiles the module if needed, instantiates a fresh module instance, writes payload bytes into WASM memory, calls exported `run(ptr, len)`, reads output bytes, and returns a string.
 10. Worker returns `shared.ExecutionResponse` with `request_id` and `execution_time_ms`; master fills `ExecutedOnNodeID` if needed and returns it to the client.
@@ -123,7 +123,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Name & Responsibility:** Creates outbound HTTP clients/transports with bounded timeouts and provides retry helpers for repeatable HTTP calls.
 - **State & Properties:** Timeout and connection-pool constants for dial, TLS handshake, response headers, full request duration, idle connections, and idle pool size. Retry constants define 3 attempts and 100ms linear backoff.
-- **Interactions:** Worker module fetches, ACR manifest/token calls, dispatcher mTLS clients, and telemetry mTLS clients use this transport policy. ACR calls, module fetches, and telemetry use `DoWithRetry`; dispatcher `/invoke` remains single-shot to avoid duplicate module execution.
+- **Interactions:** Worker module fetches, ACR manifest/token calls, dispatcher mTLS clients, and telemetry mTLS clients use this transport policy. ACR calls, module fetches, and telemetry use `DoWithRetry`; dispatcher `/invoke` does not repeat the same worker call, but may reschedule to another worker for transport errors or `502`/`503`/`504`.
 
 ### `internal/shared/server.go`
 
@@ -151,9 +151,9 @@ The core responsibility is to execute WASM modules on registered workers without
 
 ### `internal/master/dispatcher.go`
 
-- **Name & Responsibility:** Coordinates execution dispatch from master to selected worker.
+- **Name & Responsibility:** Coordinates execution dispatch from master to selected worker, including conservative alternate-worker rescheduling for transient selected-worker failures.
 - **State & Properties:** `Registry`, `Scheduler`, optional injected `Client`, and `CertDir`.
-- **Interactions:** Reads registry, calls scheduler, calls ACR helpers, creates mTLS client, forwards to worker `/invoke`.
+- **Interactions:** Reads registry, calls scheduler, calls ACR helpers, creates mTLS client, forwards to worker `/invoke`, and removes failed retryable candidates before selecting another worker.
 
 ### `internal/master/acr_manifest.go`
 
@@ -746,14 +746,14 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** Request context and execution request.
 - **Return Values:** Worker execution response.
-- **Error Handling:** ACR parse/token/manifest errors, no active workers, scheduler errors, worker forwarding errors.
-- **Side Effects:** May call Azure identity/ACR endpoints, reads registry, sends mTLS HTTP request to worker, logs dispatch events with `request_id`.
+- **Error Handling:** ACR parse/token/manifest errors, no schedulable workers, scheduler errors, non-retryable worker forwarding errors, or the last retryable worker forwarding error after all candidates fail.
+- **Side Effects:** May call Azure identity/ACR endpoints, reads registry, sends mTLS HTTP request to one or more worker candidates, logs dispatch attempts with `request_id`.
 
 ##### `func (d *Dispatcher) forwardToWorker(ctx context.Context, node shared.WorkerNode, req shared.ExecutionRequest) (shared.ExecutionResponse, error)`
 
 - **Parameters:** Context, selected worker, execution request.
 - **Return Values:** Decoded worker response with `ExecutedOnNodeID` set and `RequestID` preserved when the worker omits it.
-- **Error Handling:** JSON marshal, mTLS client creation, request creation, network failure, non-2xx worker response, JSON decode failure.
+- **Error Handling:** JSON marshal, mTLS client creation, request creation, network failure, non-2xx worker response, JSON decode failure. Network failures and worker `502`/`503`/`504` statuses are wrapped as retryable dispatch errors so `Dispatch` can choose another candidate.
 - **Side Effects:** Network I/O to worker.
 
 ##### `func workerInvokeURL(address string) string`
@@ -1191,7 +1191,7 @@ output_len = uint32(result)
 - **ACR token cache is process-local:** Repeated dispatches for the same registry repository reuse a token until 30 seconds before expiry. Multiple master instances do not share token cache state.
 - **HTTP clients are bounded:** Shared client defaults set total request, dial, TLS handshake, response-header, idle connection, and pool limits. Request contexts still provide operation-specific cancellation.
 - **HTTP servers are bounded:** Master and worker servers set read-header, read, write, and idle timeouts through the shared server factory.
-- **HTTP retries are bounded:** Safe outbound paths retry transient statuses and transport errors up to 3 attempts. Worker `/invoke` dispatch is not retried because it can execute user code.
+- **HTTP retries are bounded:** Safe outbound paths retry transient statuses and transport errors up to 3 attempts. Worker `/invoke` does not retry the same worker, but dispatch can reschedule to another candidate on transport failure or `502`/`503`/`504`.
 - **Master request bodies are bounded:** Internal worker control messages are capped at 4 KiB. `/api/v1/execute` uses `MAX_EXECUTION_REQUEST_BYTES`.
 - **Master shutdown is bounded:** Master HTTP shutdown uses `MASTER_SHUTDOWN_TIMEOUT`, so stop/restart does not wait forever on in-flight requests.
 - **Worker shutdown is bounded:** Worker HTTP shutdown uses `WORKER_SHUTDOWN_TIMEOUT`; requests still remain constrained by `EXECUTION_TIMEOUT`.
