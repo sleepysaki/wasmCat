@@ -117,8 +117,8 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/shared/metrics.go`
 
 - **Name & Responsibility:** Tracks process-local request, dispatch, execution, cache, and worker metrics.
-- **State & Properties:** Mutex-protected counters, start time, request counts by status/path, dispatch success/failure counters, dispatch reschedule counters, and worker execution counters.
-- **Interactions:** Logging middleware records request metrics; dispatcher records conservative reschedules; master and worker metrics endpoints expose snapshots.
+- **State & Properties:** Mutex-protected counters, start time, request counts by status/path, dispatch success/failure counters, dispatch reschedule counters, request idempotency counters, and worker execution counters.
+- **Interactions:** Logging middleware records request metrics; dispatcher records conservative reschedules; gateway records request idempotency outcomes; master and worker metrics endpoints expose snapshots.
 
 ### `internal/shared/client.go`
 

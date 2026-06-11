@@ -34,6 +34,9 @@ The `master` object contains:
 | `dispatch_failure` | Failed `/api/v1/execute` dispatches. |
 | `dispatch_reschedules` | Number of times the dispatcher recovered from a retryable selected-worker failure by trying another worker. |
 | `dispatch_reschedule_exhausted` | Number of requests where retryable selected-worker failures consumed all available worker candidates. |
+| `request_cache_hits` | Duplicate completed `request_id` requests served from the master response cache without worker dispatch. |
+| `request_in_progress_conflicts` | Duplicate `request_id` requests rejected because the original request is still running. |
+| `request_id_conflicts` | Requests rejected because a `request_id` was reused with different execution content. |
 
 ## Worker Fields
 
@@ -53,3 +56,5 @@ The `worker` object contains:
 The current format is JSON for simplicity and zero dependencies. It is suitable for smoke checks, custom probes, and early dashboards. A Prometheus text endpoint can be added later without replacing this endpoint.
 
 High `dispatch_reschedules` means workers are becoming unavailable after registration but before execution. High `dispatch_reschedule_exhausted` means the master is running out of healthy execution capacity for at least some requests.
+
+High `request_cache_hits` usually means clients are retrying safely. High `request_in_progress_conflicts` means clients are retrying before the original request completes. Any `request_id_conflicts` should be investigated because a caller is reusing request IDs for different work.

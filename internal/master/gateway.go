@@ -306,12 +306,15 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 	switch requestStatus.Decision {
 	case ExecutionRequestCompleted:
+		g.metrics().IncRequestCacheHit()
 		shared.WriteJSON(w, http.StatusOK, requestStatus.Response)
 		return
 	case ExecutionRequestInFlight:
+		g.metrics().IncRequestInProgressConflict()
 		shared.WriteError(w, http.StatusConflict, "request_in_progress", fmt.Errorf("request_id %q is already running", req.RequestID))
 		return
 	case ExecutionRequestConflict:
+		g.metrics().IncRequestIDConflict()
 		shared.WriteError(w, http.StatusConflict, "request_id_conflict", fmt.Errorf("request_id %q was already used for a different execution request", req.RequestID))
 		return
 	}

@@ -23,6 +23,10 @@ type Metrics struct {
 	// dispatchRescheduleExhausted counts requests where every retryable worker candidate failed.
 	dispatchRescheduleExhausted uint64
 
+	requestCacheHits           uint64
+	requestInProgressConflicts uint64
+	requestIDConflicts         uint64
+
 	workerExecutionSuccess uint64
 	workerExecutionFailure uint64
 }
@@ -50,6 +54,9 @@ type MasterMetrics struct {
 	// DispatchRescheduleExhausted means a request only saw retryable failures, but no
 	// remaining schedulable worker could complete it.
 	DispatchRescheduleExhausted uint64 `json:"dispatch_reschedule_exhausted"`
+	RequestCacheHits            uint64 `json:"request_cache_hits"`
+	RequestInProgressConflicts  uint64 `json:"request_in_progress_conflicts"`
+	RequestIDConflicts          uint64 `json:"request_id_conflicts"`
 }
 
 type WorkerMetrics struct {
@@ -126,6 +133,36 @@ func (m *Metrics) IncDispatchRescheduleExhausted() {
 	m.dispatchRescheduleExhausted++
 }
 
+func (m *Metrics) IncRequestCacheHit() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requestCacheHits++
+}
+
+func (m *Metrics) IncRequestInProgressConflict() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requestInProgressConflicts++
+}
+
+func (m *Metrics) IncRequestIDConflict() {
+	if m == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requestIDConflicts++
+}
+
 func (m *Metrics) IncWorkerExecutionSuccess() {
 	if m == nil {
 		return
@@ -177,6 +214,9 @@ func (m *Metrics) MasterSnapshot(activeWorkers int, workersByState map[string]in
 		DispatchFailure:             m.dispatchFailure,
 		DispatchReschedules:         m.dispatchReschedules,
 		DispatchRescheduleExhausted: m.dispatchRescheduleExhausted,
+		RequestCacheHits:            m.requestCacheHits,
+		RequestInProgressConflicts:  m.requestInProgressConflicts,
+		RequestIDConflicts:          m.requestIDConflicts,
 	}
 
 	return response
