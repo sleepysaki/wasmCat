@@ -974,15 +974,15 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** Module name, module URL, optional bearer token. Uses URL-aware fallback cache identity when no digest is supplied.
 - **Return Values:** Nil if module is already cached or fetched and compiled.
-- **Error Handling:** Missing URL on cache miss, request creation, network errors, non-200 status, read errors, module too large, wazero compile errors.
+- **Error Handling:** Missing URL on cache miss, request creation, network errors, non-200 status, read errors, module too large, digest format/mismatch errors when a digest is supplied, wazero compile errors.
 - **Side Effects:** HTTP GET module bytes, optional Authorization header, compiles WASM, mutates cache.
 
 ##### `func (e *WasmEngine) FetchAndCacheWithDigest(ctx context.Context, moduleName, moduleURL string, moduleDigest string, bearerToken string) error`
 
 - **Parameters:** Module name, URL, immutable digest when available, optional bearer token.
 - **Return Values:** Nil if the digest-aware key is cached or fetched and compiled.
-- **Error Handling:** Same as `FetchAndCache`.
-- **Side Effects:** May coalesce with an in-flight compile, insert a cache entry, and evict expired/LRU entries.
+- **Error Handling:** Same as `FetchAndCache`, plus `moduleDigest` must be `sha256:<64 hex characters>` when provided and must match downloaded bytes.
+- **Side Effects:** May coalesce with an in-flight compile, verify downloaded bytes, insert a cache entry, and evict expired/LRU entries.
 
 ##### `func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL string, payload string, bearerToken string) (result string, err error)`
 
@@ -997,6 +997,13 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Return Values:** WASM output string.
 - **Error Handling:** Same as `Execute`.
 - **Side Effects:** Uses digest-aware cache lookup before instantiating and running the module.
+
+##### `func verifyModuleDigest(moduleName string, wasmBytes []byte, moduleDigest string) error`
+
+- **Parameters:** Module name, downloaded WASM bytes, optional `sha256:<hex>` digest.
+- **Return Values:** Nil when no digest is supplied or when downloaded bytes match the digest.
+- **Error Handling:** Unsupported digest scheme, missing digest value, invalid hex length/content, or SHA-256 mismatch.
+- **Side Effects:** None.
 
 ##### `func (e *WasmEngine) CacheStats() ModuleCacheStats`
 

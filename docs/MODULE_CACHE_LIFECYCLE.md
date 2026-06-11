@@ -22,6 +22,8 @@ Key priority:
 
 ACR manifest resolution sets `module_digest` from the selected OCI layer digest. This means `echo:latest` can move to a new blob while the worker still distinguishes old and new compiled modules.
 
+When `module_digest` is present, the worker verifies that downloaded bytes match the declared `sha256:<hex>` digest before compiling or caching them. A mismatch is rejected before WASM compilation starts.
+
 ## Eviction Rules
 
 Eviction runs after a new module is compiled and inserted:
@@ -60,6 +62,7 @@ go run ./cmd/worker
 Cache lifecycle behavior is covered in `tests/worker/cache_lifecycle_test.go`:
 
 - digest-aware cache keys
+- worker-side SHA-256 digest verification
 - TTL refetch
 - least-recently-used eviction by entry count
 - eviction by byte budget

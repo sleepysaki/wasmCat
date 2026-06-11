@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context" // manage lifecycle, kill fnc after timeout to save resources
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -154,7 +156,7 @@ func (e *WasmEngine) FetchAndCacheWithDigest(ctx context.Context, moduleName, mo
 		return nil
 	}
 
-	compiled, wasmBytes, err := e.downloadAndCompile(ctx, moduleName, moduleURL, bearerToken)
+	compiled, wasmBytes, err := e.downloadAndCompile(ctx, moduleName, moduleURL, moduleDigest, bearerToken)
 	if err != nil {
 		return err
 	}
@@ -290,7 +292,7 @@ func (e *WasmEngine) ExecuteWithDigest(ctx context.Context, moduleName string, m
 	return output, nil
 }
 
-func (e *WasmEngine) downloadAndCompile(ctx context.Context, moduleName, moduleURL string, bearerToken string) (wazero.CompiledModule, []byte, error) {
+func (e *WasmEngine) downloadAndCompile(ctx context.Context, moduleName, moduleURL string, moduleDigest string, bearerToken string) (wazero.CompiledModule, []byte, error) {
 	// Module fetching has its own timeout.
 	// This keeps slow storage or a stuck registry from holding a worker request forever.
 	fetchCtx, cancel := context.WithTimeout(ctx, e.limits.ModuleFetchTimeout)
@@ -330,6 +332,9 @@ func (e *WasmEngine) downloadAndCompile(ctx context.Context, moduleName, moduleU
 	if int64(len(wasmBytes)) > e.limits.MaxModuleBytes {
 		return nil, nil, fmt.Errorf("module %s exceeds max size of %d bytes", moduleName, e.limits.MaxModuleBytes)
 	}
+	if err := verifyModuleDigest(moduleName, wasmBytes, moduleDigest); err != nil {
+		return nil, nil, err
+	}
 
 	// Compile once and cache the compiled form.
 	// Compilation is more expensive than instantiation, so the cache avoids doing it for every request.
@@ -339,6 +344,33 @@ func (e *WasmEngine) downloadAndCompile(ctx context.Context, moduleName, moduleU
 	}
 
 	return compiled, wasmBytes, nil
+}
+
+func verifyModuleDigest(moduleName string, wasmBytes []byte, moduleDigest string) error {
+	moduleDigest = strings.TrimSpace(moduleDigest)
+	if moduleDigest == "" {
+		return nil
+	}
+
+	algorithm, expectedDigest, ok := strings.Cut(moduleDigest, ":")
+	if !ok || algorithm != "sha256" || expectedDigest == "" {
+		return fmt.Errorf("unsupported module digest %q for %s", moduleDigest, moduleName)
+	}
+	expectedDigest = strings.ToLower(strings.TrimSpace(expectedDigest))
+	if len(expectedDigest) != sha256.Size*2 {
+		return fmt.Errorf("module digest %q for %s must be a sha256 hex digest", moduleDigest, moduleName)
+	}
+	if _, err := hex.DecodeString(expectedDigest); err != nil {
+		return fmt.Errorf("module digest %q for %s must be valid hex: %w", moduleDigest, moduleName, err)
+	}
+
+	actual := sha256.Sum256(wasmBytes)
+	actualDigest := hex.EncodeToString(actual[:])
+	if actualDigest != expectedDigest {
+		return fmt.Errorf("module %s digest mismatch: expected sha256:%s got sha256:%s", moduleName, expectedDigest, actualDigest)
+	}
+
+	return nil
 }
 
 func (e *WasmEngine) cachedCompiledModule(cacheKey string, now time.Time) (wazero.CompiledModule, bool) {

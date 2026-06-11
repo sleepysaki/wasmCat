@@ -107,4 +107,4 @@ low 32 bits  = output length
 - Manifest layer selection is conservative: one layer is accepted, or a known WASM media type is selected from multiple layers.
 - Token caching is process-local; multiple master instances do not share cached ACR tokens.
 - Module downloads use the shared bounded HTTP client and worker module size limits.
-- The worker cache prefers digest-aware keys when the master resolves an ACR manifest to an immutable layer digest.
+- The worker verifies the resolved `sha256:<digest>` against downloaded bytes before compiling, then uses the digest-aware cache key.

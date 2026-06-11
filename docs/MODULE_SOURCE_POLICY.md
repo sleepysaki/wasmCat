@@ -56,3 +56,4 @@ Rejected request when digest is required:
 - Keep `MODULE_HOST_ALLOWLIST` empty only for local development or tightly controlled test networks.
 - Prefer immutable digest-pinned modules in production so reused names or tags cannot silently point to different code.
 - For ACR manifest tags such as `latest`, leave `REQUIRE_MODULE_DIGEST=false` or use a digest-pinned manifest/blob URL.
+- When `module_digest` is present, workers verify downloaded module bytes against the declared `sha256:<hex>` digest before compiling.
