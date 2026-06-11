@@ -22,6 +22,8 @@ type MasterOptions struct {
 	MinWorkerRAMFreeMB  float64
 	ExecuteClientIDs    string
 	MaxExecuteBodyBytes int64
+	ModuleHostAllowlist string
+	RequireModuleDigest bool
 	DevWorkerID         string
 	GenerateDevCerts    bool
 	Force               bool
@@ -91,6 +93,8 @@ func InitMaster(options MasterOptions) (Result, error) {
 		{"MIN_WORKER_RAM_FREE_MB", strconv.FormatFloat(options.MinWorkerRAMFreeMB, 'f', -1, 64)},
 		{"EXECUTE_CLIENT_ALLOWLIST", options.ExecuteClientIDs},
 		{"MAX_EXECUTION_REQUEST_BYTES", strconv.FormatInt(options.MaxExecuteBodyBytes, 10)},
+		{"MODULE_HOST_ALLOWLIST", options.ModuleHostAllowlist},
+		{"REQUIRE_MODULE_DIGEST", strconv.FormatBool(options.RequireModuleDigest)},
 	}
 
 	if err := writeEnvFile(configPath, values, options.Force); err != nil {

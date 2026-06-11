@@ -115,7 +115,7 @@ func (d *Dispatcher) forwardToWorker(ctx context.Context, node shared.WorkerNode
 	// Send the request
 	reqHTTP, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
-		return shared.ExecutionResponse{}, err
+		return shared.ExecutionResponse{}, fmt.Errorf("create worker request: %w", err)
 	}
 	reqHTTP.Header.Set("Content-Type", "application/json")
 

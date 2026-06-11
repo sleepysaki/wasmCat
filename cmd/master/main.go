@@ -67,7 +67,11 @@ func main() {
 		CertDir:             cfg.CertDir,
 		ExecuteClientIDs:    cfg.ExecuteClientIDs,
 		MaxExecuteBodyBytes: cfg.MaxExecuteBodyBytes,
-		ShutdownTimeout:     cfg.ShutdownTimeout,
+		ModulePolicy: master.ModulePolicy{
+			AllowedHosts:  cfg.ModuleHostAllowlist,
+			RequireDigest: cfg.RequireModuleDigest,
+		},
+		ShutdownTimeout: cfg.ShutdownTimeout,
 	}
 
 	// Background Processes
@@ -127,6 +131,8 @@ func runInit(args []string) error {
 	minWorkerRAMFreeMB := flags.Float64("min-worker-ram-free-mb", 0, "minimum free RAM in MiB required for scheduling")
 	executeClientAllowlist := flags.String("execute-client-allowlist", "", "comma-separated client certificate CN or DNS SAN values allowed to call /api/v1/execute")
 	maxExecuteBodyBytes := flags.Int64("max-execution-request-bytes", 2<<20, "maximum JSON body size accepted by /api/v1/execute")
+	moduleHostAllowlist := flags.String("module-host-allowlist", "", "comma-separated module URL hosts allowed by the master; empty allows any host")
+	requireModuleDigest := flags.Bool("require-module-digest", false, "require execution requests to include a module digest or digest-pinned OCI URL")
 	devWorkerID := flags.String("dev-worker-id", "worker-vn-01", "worker ID used when generating development certificates")
 	devCerts := flags.Bool("dev-certs", false, "generate local development certificates")
 	force := flags.Bool("force", false, "overwrite existing generated files")
@@ -146,6 +152,8 @@ func runInit(args []string) error {
 		MinWorkerRAMFreeMB:  *minWorkerRAMFreeMB,
 		ExecuteClientIDs:    *executeClientAllowlist,
 		MaxExecuteBodyBytes: *maxExecuteBodyBytes,
+		ModuleHostAllowlist: *moduleHostAllowlist,
+		RequireModuleDigest: *requireModuleDigest,
 		DevWorkerID:         *devWorkerID,
 		GenerateDevCerts:    *devCerts,
 		Force:               *force,

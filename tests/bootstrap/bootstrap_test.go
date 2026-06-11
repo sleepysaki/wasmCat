@@ -24,6 +24,8 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 		MinWorkerRAMFreeMB:  256,
 		ExecuteClientIDs:    "wasmcat-client,deployer.internal",
 		MaxExecuteBodyBytes: 4096,
+		ModuleHostAllowlist: "modules.internal,registry.azurecr.io",
+		RequireModuleDigest: true,
 		DevWorkerID:         "worker-test-01",
 	})
 	if err != nil {
@@ -49,6 +51,8 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 	assertContains(t, env, "MIN_WORKER_RAM_FREE_MB=256\n")
 	assertContains(t, env, "EXECUTE_CLIENT_ALLOWLIST=wasmcat-client,deployer.internal\n")
 	assertContains(t, env, "MAX_EXECUTION_REQUEST_BYTES=4096\n")
+	assertContains(t, env, "MODULE_HOST_ALLOWLIST=modules.internal,registry.azurecr.io\n")
+	assertContains(t, env, "REQUIRE_MODULE_DIGEST=true\n")
 }
 
 func TestInitMasterRefusesToOverwriteEnvWithoutForce(t *testing.T) {

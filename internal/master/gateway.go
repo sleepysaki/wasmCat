@@ -37,6 +37,7 @@ type Gateway struct {
 	ExecuteClientIDs []string
 
 	MaxExecuteBodyBytes int64
+	ModulePolicy        ModulePolicy
 	// How long the master waits for active HTTP requests after SIGINT/SIGTERM.
 	// This protects shutdown from hanging forever while still giving in-flight requests a chance to finish.
 	ShutdownTimeout time.Duration
@@ -282,6 +283,10 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := req.Validate(); err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+		return
+	}
+	if err := g.ModulePolicy.Validate(req); err != nil {
+		shared.WriteError(w, http.StatusForbidden, "module_policy_violation", err)
 		return
 	}
 	requestID, err := shared.EnsureRequestID(req.RequestID)

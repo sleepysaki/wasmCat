@@ -48,7 +48,7 @@ The core responsibility is to execute WASM modules on registered workers without
 #### Execution request lifecycle
 
 1. Client sends JSON to `POST /api/v1/execute` on the master.
-2. `Gateway.handleExecute` decodes `shared.ExecutionRequest`, calls `ExecutionRequest.Validate`, and preserves or creates `request_id`.
+2. `Gateway.handleExecute` decodes `shared.ExecutionRequest`, calls `ExecutionRequest.Validate`, applies module source policy, and preserves or creates `request_id`.
 3. `Dispatcher.Dispatch` normalizes module URL fields.
 4. If the URL points at `*.azurecr.io`, the dispatcher:
    - parses the ACR reference,
@@ -134,7 +134,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/master/gateway.go`
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
-- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, optional `Gateway.ExecuteClientIDs`, request body limit, and graceful shutdown timeout.
+- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, optional `Gateway.ExecuteClientIDs`, module source policy, request body limit, and graceful shutdown timeout.
 - **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain, validates execution client certificate identity when configured, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
 
 ### `internal/master/registry.go`
@@ -224,7 +224,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Return Values:** `error` only. Nil means config/cert directories and `master.env` were created successfully.
 - **Error Handling:** Returns flag parse errors and bootstrap validation/write errors.
 - **Side Effects:** Writes status lines to stdout through caller, creates directories/files through `bootstrap.InitMaster`.
-- **Flags:** `--config-dir`, `--cert-dir`, `--port`, `--cleanup-interval`, `--worker-stale-timeout`, `--master-shutdown-timeout`, `--dev-worker-id`, `--dev-certs`, `--force`.
+- **Flags:** `--config-dir`, `--cert-dir`, `--port`, `--cleanup-interval`, `--worker-stale-timeout`, `--master-shutdown-timeout`, `--execute-client-allowlist`, `--module-host-allowlist`, `--require-module-digest`, `--dev-worker-id`, `--dev-certs`, `--force`.
 
 ##### `func defaultConfigDir() string`
 
@@ -265,6 +265,8 @@ The core responsibility is to execute WASM modules on registered workers without
   - `CleanupInterval string`: duration string for registry cleanup ticker. Defaults to `15s`.
   - `WorkerStaleTimeout string`: duration string for how long a worker may miss heartbeats before cleanup removes it. Defaults to `30s`.
   - `ShutdownTimeout string`: duration string for graceful master HTTP shutdown. Defaults to `5s`.
+  - `ModuleHostAllowlist string`: comma-separated allowed module URL hosts.
+  - `RequireModuleDigest bool`: requires digest-pinned module requests when true.
   - `DevWorkerID string`: worker ID used when generating local dev certs. Defaults to `worker-vn-01`.
   - `GenerateDevCerts bool`: when true, writes local CA/master/worker certs.
   - `Force bool`: allows overwriting existing env or generated dev cert files.
@@ -337,8 +339,8 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func LoadMaster() (MasterConfig, error)`
 
 - **Parameters:** None.
-- **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `WorkerStaleTimeout`, `ShutdownTimeout`, `MinWorkerCPUFree`, and `MinWorkerRAMFreeMB`.
-- **Error Handling:** Invalid or non-positive `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, or `MAX_EXECUTION_REQUEST_BYTES`; invalid `AUTO_GENERATE_CERTS`; `MIN_WORKER_CPU_FREE` outside `0..100`; negative `MIN_WORKER_RAM_FREE_MB`.
+- **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `WorkerStaleTimeout`, `ShutdownTimeout`, `MinWorkerCPUFree`, `MinWorkerRAMFreeMB`, `ModuleHostAllowlist`, and `RequireModuleDigest`.
+- **Error Handling:** Invalid or non-positive `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, or `MAX_EXECUTION_REQUEST_BYTES`; invalid `AUTO_GENERATE_CERTS` or `REQUIRE_MODULE_DIGEST`; `MIN_WORKER_CPU_FREE` outside `0..100`; negative `MIN_WORKER_RAM_FREE_MB`.
 - **Side Effects:** Reads process environment.
 
 ##### `func LoadWorker() (WorkerConfig, error)`
@@ -633,7 +635,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** JSON `shared.ExecutionRequest`.
 - **Return Values:** 200 `ExecutionResponse` on success.
-- **Error Handling:** 405 wrong method, 403 unauthorized execution client, 400 invalid JSON or validation failure, 503 dispatch failure.
+- **Error Handling:** 405 wrong method, 403 unauthorized execution client, 403 module policy violation, 400 invalid JSON or validation failure, 503 dispatch failure.
 - **Side Effects:** Validates execution client certificate identity when configured, validates or creates `request_id`, triggers scheduling, ACR network calls, and worker network call.
 
 ##### `func (g *Gateway) validateExecuteClientIdentity(r *http.Request) error`
@@ -1055,6 +1057,8 @@ The core responsibility is to execute WASM modules on registered workers without
 | `MIN_WORKER_RAM_FREE_MB` | `0` | float MiB | Minimum reported free RAM required before the scheduler can select a worker. |
 | `EXECUTE_CLIENT_ALLOWLIST` | empty | comma-separated certificate identities | Optional client certificate CN or DNS SAN allowlist for `/api/v1/execute`. Empty allows any trusted mTLS client. |
 | `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | integer bytes | Maximum JSON body size accepted by master `/api/v1/execute`. |
+| `MODULE_HOST_ALLOWLIST` | empty | comma-separated hosts | Optional module URL host allowlist for `/api/v1/execute`. Empty allows any host. |
+| `REQUIRE_MODULE_DIGEST` | `false` | Go boolean string | When true, execution requests must include `module_digest` or use a digest-pinned OCI manifest/blob URL. |
 
 ### Worker Environment Variables
 
@@ -1091,6 +1095,8 @@ wasmcat-master init \
   --cleanup-interval 15s \
   --worker-stale-timeout 30s \
   --master-shutdown-timeout 5s \
+  --module-host-allowlist modules.internal,myregistry.azurecr.io \
+  --require-module-digest \
   --dev-worker-id worker-vn-01
 ```
 
@@ -1121,7 +1127,7 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | Master | `POST` | `/internal/register` | `WorkerNode` | `APIResponse` | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch. |
 | Master | `POST` | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
 | Master | `POST` | `/internal/drain` | `DrainRequest` | `APIResponse` | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
-| Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 413 body too large, 403 unauthorized execution client, 400 invalid JSON/request, 503 dispatch failure. |
+| Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 413 body too large, 403 unauthorized execution client, 403 module policy violation, 400 invalid JSON/request, 503 dispatch failure. |
 | Worker | `GET` | `/wasmcat/health` | none | `HealthResponse` | 405 wrong method, JSON encode failure only. |
 | Worker | `GET` | `/wasmcat/ready` | none | `HealthResponse` | 405 wrong method, 503 if engine is nil. |
 | Worker | `GET` | `/wasmcat/metrics` | none | `MetricsResponse` | 405 wrong method, JSON encode failure only. |
@@ -1198,6 +1204,7 @@ output_len = uint32(result)
 - **Telemetry is host-level, not cgroup-level:** gopsutil reports host CPU and memory. It does not currently account for per-service cgroup quotas.
 - **No persistent state:** Registry and module cache are in memory. Master restart loses worker registry; worker restart loses compiled module cache.
 - **Execution authorization allowlist is optional:** If `EXECUTE_CLIENT_ALLOWLIST` is empty, any valid client certificate trusted by the CA can call `/api/v1/execute`.
+- **Module source policy is optional:** If `MODULE_HOST_ALLOWLIST` is empty and `REQUIRE_MODULE_DIGEST=false`, trusted execution clients can submit any HTTP(S) module URL.
 - **WASM ABI is narrow:** Modules must match the exact `memory`, `malloc`, and packed `run` ABI. WASI modules or modules with different host imports are not supported by the current engine path.
 
 ### Operational Recommendations

@@ -140,12 +140,21 @@ MIN_WORKER_CPU_FREE=10
 MIN_WORKER_RAM_FREE_MB=256
 EXECUTE_CLIENT_ALLOWLIST=
 MAX_EXECUTION_REQUEST_BYTES=2097152
+MODULE_HOST_ALLOWLIST=
+REQUIRE_MODULE_DIGEST=false
 ```
 
 For production, set `EXECUTE_CLIENT_ALLOWLIST` to the client certificate common names or DNS SANs allowed to submit execution requests. Example:
 
 ```text
 EXECUTE_CLIENT_ALLOWLIST=wasmcat-client,deployer.internal
+```
+
+Set `MODULE_HOST_ALLOWLIST` and `REQUIRE_MODULE_DIGEST` to restrict executable module sources. Example:
+
+```text
+MODULE_HOST_ALLOWLIST=modules.internal,myregistry.azurecr.io
+REQUIRE_MODULE_DIGEST=true
 ```
 
 Mount or copy these files into `/etc/wasmcat/certs`:

@@ -4,6 +4,7 @@ wasmCat reads runtime configuration from environment variables and keeps local-d
 
 Module cache behavior is documented in [MODULE_CACHE_LIFECYCLE.md](MODULE_CACHE_LIFECYCLE.md).
 Execution client authorization is documented in [EXECUTION_AUTHORIZATION.md](EXECUTION_AUTHORIZATION.md).
+Module source policy is documented in [MODULE_SOURCE_POLICY.md](MODULE_SOURCE_POLICY.md).
 
 All duration values use Go duration syntax, such as `5s`, `30s`, or `30m`, and must be greater than zero.
 Byte and count limits must be greater than zero. CPU scheduling thresholds must be between `0` and `100`; RAM thresholds must be zero or greater.
@@ -23,6 +24,8 @@ Byte and count limits must be greater than zero. CPU scheduling thresholds must 
 | `MIN_WORKER_RAM_FREE_MB` | `0` | Minimum free RAM in MiB required for a worker to receive new work. |
 | `EXECUTE_CLIENT_ALLOWLIST` | empty | Comma-separated client certificate CN or DNS SAN values allowed to call `/api/v1/execute`. Empty means any trusted mTLS client can execute work. |
 | `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | Maximum JSON body size accepted by the master `/api/v1/execute` endpoint. |
+| `MODULE_HOST_ALLOWLIST` | empty | Comma-separated module URL hosts allowed by `/api/v1/execute`. Empty allows any host. |
+| `REQUIRE_MODULE_DIGEST` | `false` | Require `module_digest` or a digest-pinned OCI manifest/blob URL before dispatch. |
 
 ## Worker
 

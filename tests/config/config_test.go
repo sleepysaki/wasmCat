@@ -133,6 +133,8 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	t.Setenv("MIN_WORKER_RAM_FREE_MB", "512")
 	t.Setenv("EXECUTE_CLIENT_ALLOWLIST", "wasmcat-client, deployer.internal ")
 	t.Setenv("MAX_EXECUTION_REQUEST_BYTES", "4096")
+	t.Setenv("MODULE_HOST_ALLOWLIST", "modules.internal, registry.azurecr.io ")
+	t.Setenv("REQUIRE_MODULE_DIGEST", "true")
 
 	cfg, err := config.LoadMaster()
 	if err != nil {
@@ -166,6 +168,12 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	if cfg.MaxExecuteBodyBytes != 4096 {
 		t.Fatalf("expected max execute body bytes 4096, got %d", cfg.MaxExecuteBodyBytes)
 	}
+	if len(cfg.ModuleHostAllowlist) != 2 || cfg.ModuleHostAllowlist[0] != "modules.internal" || cfg.ModuleHostAllowlist[1] != "registry.azurecr.io" {
+		t.Fatalf("unexpected module host allowlist: %+v", cfg.ModuleHostAllowlist)
+	}
+	if !cfg.RequireModuleDigest {
+		t.Fatal("expected require module digest to be enabled")
+	}
 }
 
 func TestLoadMasterRejectsInvalidAutoGenerateCerts(t *testing.T) {
@@ -174,6 +182,15 @@ func TestLoadMasterRejectsInvalidAutoGenerateCerts(t *testing.T) {
 	_, err := config.LoadMaster()
 	if err == nil {
 		t.Fatal("expected invalid boolean error")
+	}
+}
+
+func TestLoadMasterRejectsInvalidRequireModuleDigest(t *testing.T) {
+	t.Setenv("REQUIRE_MODULE_DIGEST", "sometimes")
+
+	_, err := config.LoadMaster()
+	if err == nil {
+		t.Fatal("expected invalid require module digest error")
 	}
 }
 

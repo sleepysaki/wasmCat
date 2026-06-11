@@ -55,6 +55,8 @@ func PublicErrorMessage(code string) string {
 		return "Worker is not registered."
 	case "invalid_execution_request":
 		return "Invalid execution request."
+	case "module_policy_violation":
+		return "Module source policy rejected the request."
 	case "dispatch_failed":
 		return "Execution could not be dispatched."
 	case "execution_failed":

@@ -30,6 +30,7 @@ Handlers pass the real Go error to `shared.WriteError`. The function logs the ra
 | `worker_identity_mismatch` | `Worker certificate identity does not match the requested worker ID.` |
 | `worker_not_found` | `Worker is not registered.` |
 | `invalid_execution_request` | `Invalid execution request.` |
+| `module_policy_violation` | `Module source policy rejected the request.` |
 | `dispatch_failed` | `Execution could not be dispatched.` |
 | `execution_failed` | `WASM execution failed.` |
 | `not_ready` | `Service is not ready.` |

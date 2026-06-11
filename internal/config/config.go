@@ -33,6 +33,8 @@ type MasterConfig struct {
 	MinWorkerRAMFreeMB  float64
 	ExecuteClientIDs    []string
 	MaxExecuteBodyBytes int64
+	ModuleHostAllowlist []string
+	RequireModuleDigest bool
 }
 
 type WorkerConfig struct {
@@ -82,6 +84,10 @@ func LoadMaster() (MasterConfig, error) {
 	if err != nil {
 		return MasterConfig{}, err
 	}
+	requireModuleDigest, err := boolEnv("REQUIRE_MODULE_DIGEST", false)
+	if err != nil {
+		return MasterConfig{}, err
+	}
 
 	cfg := MasterConfig{
 		Port:                stringEnv("MASTER_PORT", "7270"),
@@ -95,6 +101,8 @@ func LoadMaster() (MasterConfig, error) {
 		MinWorkerRAMFreeMB:  minWorkerRAMFreeMB,
 		ExecuteClientIDs:    listEnv("EXECUTE_CLIENT_ALLOWLIST"),
 		MaxExecuteBodyBytes: maxExecuteBodyBytes,
+		ModuleHostAllowlist: listEnv("MODULE_HOST_ALLOWLIST"),
+		RequireModuleDigest: requireModuleDigest,
 	}
 
 	return cfg, nil
