@@ -28,6 +28,8 @@ type MasterOptions struct {
 	JobStorePath           string
 	JobMaxAttempts         int
 	JobLeaseTTL            string
+	JobRecoveryInterval    string
+	JobRecoveryBatchSize   int
 	ModuleHostAllowlist    string
 	RequireModuleDigest    bool
 	DevWorkerID            string
@@ -104,6 +106,8 @@ func InitMaster(options MasterOptions) (Result, error) {
 		{"JOB_STORE_PATH", options.JobStorePath},
 		{"JOB_MAX_ATTEMPTS", strconv.Itoa(options.JobMaxAttempts)},
 		{"JOB_LEASE_TTL", options.JobLeaseTTL},
+		{"JOB_RECOVERY_INTERVAL", options.JobRecoveryInterval},
+		{"JOB_RECOVERY_BATCH_SIZE", strconv.Itoa(options.JobRecoveryBatchSize)},
 		{"MODULE_HOST_ALLOWLIST", options.ModuleHostAllowlist},
 		{"REQUIRE_MODULE_DIGEST", strconv.FormatBool(options.RequireModuleDigest)},
 	}
@@ -195,6 +199,12 @@ func normalizeMaster(options MasterOptions) MasterOptions {
 	}
 	if options.JobLeaseTTL == "" {
 		options.JobLeaseTTL = "30s"
+	}
+	if options.JobRecoveryInterval == "" {
+		options.JobRecoveryInterval = "5s"
+	}
+	if options.JobRecoveryBatchSize == 0 {
+		options.JobRecoveryBatchSize = 32
 	}
 	if options.DevWorkerID == "" {
 		options.DevWorkerID = "worker-vn-01"
@@ -289,6 +299,12 @@ func validateMaster(options MasterOptions) error {
 	}
 	if err := validatePositiveDuration("job lease ttl", options.JobLeaseTTL); err != nil {
 		return fmt.Errorf("parse job lease ttl: %w", err)
+	}
+	if err := validatePositiveDuration("job recovery interval", options.JobRecoveryInterval); err != nil {
+		return fmt.Errorf("parse job recovery interval: %w", err)
+	}
+	if options.JobRecoveryBatchSize <= 0 {
+		return fmt.Errorf("job recovery batch size must be greater than zero")
 	}
 
 	return nil

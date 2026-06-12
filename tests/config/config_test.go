@@ -149,6 +149,8 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	t.Setenv("JOB_STORE_PATH", "C:\\wasmcat\\jobs.db")
 	t.Setenv("JOB_MAX_ATTEMPTS", "5")
 	t.Setenv("JOB_LEASE_TTL", "45s")
+	t.Setenv("JOB_RECOVERY_INTERVAL", "7s")
+	t.Setenv("JOB_RECOVERY_BATCH_SIZE", "9")
 	t.Setenv("MODULE_HOST_ALLOWLIST", "modules.internal, registry.azurecr.io ")
 	t.Setenv("REQUIRE_MODULE_DIGEST", "true")
 
@@ -198,6 +200,12 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	}
 	if cfg.JobLeaseTTL != 45*time.Second {
 		t.Fatalf("expected job lease ttl 45s, got %s", cfg.JobLeaseTTL)
+	}
+	if cfg.JobRecoveryInterval != 7*time.Second {
+		t.Fatalf("expected job recovery interval 7s, got %s", cfg.JobRecoveryInterval)
+	}
+	if cfg.JobRecoveryBatchSize != 9 {
+		t.Fatalf("expected job recovery batch size 9, got %d", cfg.JobRecoveryBatchSize)
 	}
 	if len(cfg.ModuleHostAllowlist) != 2 || cfg.ModuleHostAllowlist[0] != "modules.internal" || cfg.ModuleHostAllowlist[1] != "registry.azurecr.io" {
 		t.Fatalf("unexpected module host allowlist: %+v", cfg.ModuleHostAllowlist)
@@ -275,6 +283,9 @@ func TestLoadMasterRejectsInvalidJobReliabilitySettings(t *testing.T) {
 		{name: "non-positive attempts", env: "JOB_MAX_ATTEMPTS", value: "0"},
 		{name: "invalid lease ttl", env: "JOB_LEASE_TTL", value: "soon"},
 		{name: "non-positive lease ttl", env: "JOB_LEASE_TTL", value: "0s"},
+		{name: "invalid recovery interval", env: "JOB_RECOVERY_INTERVAL", value: "soon"},
+		{name: "non-positive recovery interval", env: "JOB_RECOVERY_INTERVAL", value: "0s"},
+		{name: "non-positive recovery batch size", env: "JOB_RECOVERY_BATCH_SIZE", value: "0"},
 	}
 
 	for _, tt := range tests {

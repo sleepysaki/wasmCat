@@ -39,6 +39,8 @@ type MasterConfig struct {
 	JobStorePath           string
 	JobMaxAttempts         int
 	JobLeaseTTL            time.Duration
+	JobRecoveryInterval    time.Duration
+	JobRecoveryBatchSize   int
 	ModuleHostAllowlist    []string
 	RequireModuleDigest    bool
 }
@@ -106,6 +108,14 @@ func LoadMaster() (MasterConfig, error) {
 	if err != nil {
 		return MasterConfig{}, err
 	}
+	jobRecoveryInterval, err := positiveDurationEnv("JOB_RECOVERY_INTERVAL", 5*time.Second)
+	if err != nil {
+		return MasterConfig{}, err
+	}
+	jobRecoveryBatchSize, err := positiveIntEnv("JOB_RECOVERY_BATCH_SIZE", 32)
+	if err != nil {
+		return MasterConfig{}, err
+	}
 	requireModuleDigest, err := boolEnv("REQUIRE_MODULE_DIGEST", false)
 	if err != nil {
 		return MasterConfig{}, err
@@ -128,6 +138,8 @@ func LoadMaster() (MasterConfig, error) {
 		JobStorePath:           stringEnv("JOB_STORE_PATH", "./wasmcat-jobs.db"),
 		JobMaxAttempts:         jobMaxAttempts,
 		JobLeaseTTL:            jobLeaseTTL,
+		JobRecoveryInterval:    jobRecoveryInterval,
+		JobRecoveryBatchSize:   jobRecoveryBatchSize,
 		ModuleHostAllowlist:    listEnv("MODULE_HOST_ALLOWLIST"),
 		RequireModuleDigest:    requireModuleDigest,
 	}

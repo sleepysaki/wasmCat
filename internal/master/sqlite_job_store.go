@@ -142,6 +142,19 @@ func (s *SQLiteJobStore) Get(ctx context.Context, requestID string) (JobRecord, 
 	return job, nil
 }
 
+func (s *SQLiteJobStore) MarkQueued(ctx context.Context, requestID string, reason string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = ?, worker_id = '', lease_until = 0, last_error = ?, updated_at = ?
+		WHERE request_id = ?`,
+		string(JobQueued),
+		reason,
+		unixMilli(s.now()),
+		requestID,
+	)
+	return requireUpdated(result, err, "mark job queued")
+}
+
 func (s *SQLiteJobStore) MarkDispatching(ctx context.Context, requestID string, workerID string, leaseUntil time.Time) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE jobs
@@ -185,6 +198,19 @@ func (s *SQLiteJobStore) MarkFailed(ctx context.Context, requestID string, reaso
 		requestID,
 	)
 	return requireUpdated(result, err, "mark job failed")
+}
+
+func (s *SQLiteJobStore) MarkAmbiguous(ctx context.Context, requestID string, reason string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = ?, lease_until = 0, last_error = ?, updated_at = ?
+		WHERE request_id = ?`,
+		string(JobAmbiguous),
+		reason,
+		unixMilli(s.now()),
+		requestID,
+	)
+	return requireUpdated(result, err, "mark job ambiguous")
 }
 
 func (s *SQLiteJobStore) ListRecoverable(ctx context.Context, now time.Time, limit int) ([]JobRecord, error) {

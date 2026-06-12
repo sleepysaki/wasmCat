@@ -30,6 +30,8 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 		JobStorePath:           filepath.Join(configDir, "jobs.db"),
 		JobMaxAttempts:         5,
 		JobLeaseTTL:            "45s",
+		JobRecoveryInterval:    "7s",
+		JobRecoveryBatchSize:   9,
 		ModuleHostAllowlist:    "modules.internal,registry.azurecr.io",
 		RequireModuleDigest:    true,
 		DevWorkerID:            "worker-test-01",
@@ -62,6 +64,8 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 	assertContains(t, env, "JOB_STORE_PATH="+filepath.Join(configDir, "jobs.db")+"\n")
 	assertContains(t, env, "JOB_MAX_ATTEMPTS=5\n")
 	assertContains(t, env, "JOB_LEASE_TTL=45s\n")
+	assertContains(t, env, "JOB_RECOVERY_INTERVAL=7s\n")
+	assertContains(t, env, "JOB_RECOVERY_BATCH_SIZE=9\n")
 	assertContains(t, env, "MODULE_HOST_ALLOWLIST=modules.internal,registry.azurecr.io\n")
 	assertContains(t, env, "REQUIRE_MODULE_DIGEST=true\n")
 }
@@ -149,6 +153,18 @@ func TestInitMasterRejectsInvalidCapacityThresholds(t *testing.T) {
 			name: "non-positive job lease ttl",
 			options: bootstrap.MasterOptions{
 				JobLeaseTTL: "0s",
+			},
+		},
+		{
+			name: "non-positive job recovery interval",
+			options: bootstrap.MasterOptions{
+				JobRecoveryInterval: "0s",
+			},
+		},
+		{
+			name: "non-positive job recovery batch size",
+			options: bootstrap.MasterOptions{
+				JobRecoveryBatchSize: -1,
 			},
 		},
 	}

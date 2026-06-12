@@ -121,6 +121,16 @@ func main() {
 		}
 	}()
 
+	recovery := &master.JobRecovery{
+		Store:     jobStore,
+		Dispatch:  dispatch.Dispatch,
+		Metrics:   metrics,
+		Interval:  cfg.JobRecoveryInterval,
+		BatchSize: cfg.JobRecoveryBatchSize,
+		LeaseTTL:  cfg.JobLeaseTTL,
+	}
+	go recovery.Start(ctx)
+
 	// Ignition
 
 	// Turn on the API Server
@@ -154,6 +164,8 @@ func runInit(args []string) error {
 	jobStorePath := flags.String("job-store-path", "", "SQLite file path for durable job state; defaults to <config-dir>/wasmcat-jobs.db")
 	jobMaxAttempts := flags.Int("job-max-attempts", 3, "maximum synchronous dispatch attempts recorded for one durable job")
 	jobLeaseTTL := flags.String("job-lease-ttl", "30s", "how long a dispatching job lease remains valid for recovery")
+	jobRecoveryInterval := flags.String("job-recovery-interval", "5s", "how often the master scans durable jobs for recovery")
+	jobRecoveryBatchSize := flags.Int("job-recovery-batch-size", 32, "maximum durable jobs recovered per scan")
 	moduleHostAllowlist := flags.String("module-host-allowlist", "", "comma-separated module URL hosts allowed by the master; empty allows any host")
 	requireModuleDigest := flags.Bool("require-module-digest", false, "require execution requests to include a module digest or digest-pinned OCI URL")
 	devWorkerID := flags.String("dev-worker-id", "worker-vn-01", "worker ID used when generating development certificates")
@@ -180,6 +192,8 @@ func runInit(args []string) error {
 		JobStorePath:           *jobStorePath,
 		JobMaxAttempts:         *jobMaxAttempts,
 		JobLeaseTTL:            *jobLeaseTTL,
+		JobRecoveryInterval:    *jobRecoveryInterval,
+		JobRecoveryBatchSize:   *jobRecoveryBatchSize,
 		ModuleHostAllowlist:    *moduleHostAllowlist,
 		RequireModuleDigest:    *requireModuleDigest,
 		DevWorkerID:            *devWorkerID,

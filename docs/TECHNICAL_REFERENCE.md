@@ -28,10 +28,11 @@ The core responsibility is to execute WASM modules on registered workers without
 3. Normal startup calls `logging.Configure("master")`.
 4. `signal.NotifyContext` creates a root context cancelled by `SIGINT` or `SIGTERM`.
 5. `config.LoadMaster` reads master environment variables.
-6. The process constructs `Registry`, `Scheduler`, `Dispatcher`, and `Gateway`.
+6. The process constructs `Registry`, `Scheduler`, durable SQLite `JobStore`, `Dispatcher`, and `Gateway`.
 7. If `AUTO_GENERATE_CERTS=true`, `security.GenerateCAAndCerts` writes a local CA, master cert, and worker cert.
 8. A cleanup goroutine calls `Registry.Cleanup` on `CLEANUP_INTERVAL`; `WORKER_STALE_TIMEOUT` decides which workers are old enough to remove.
-9. `Gateway.Start` loads CA/master certificates, creates an HTTPS server requiring client certificates, and blocks until shutdown or server error.
+9. A recovery goroutine scans durable jobs on `JOB_RECOVERY_INTERVAL`, dispatches queued jobs, and marks expired active leases ambiguous.
+10. `Gateway.Start` loads CA/master certificates, creates an HTTPS server requiring client certificates, and blocks until shutdown or server error.
 
 #### Worker runtime lifecycle
 
@@ -162,6 +163,12 @@ The core responsibility is to execute WASM modules on registered workers without
 - **State & Properties:** `database/sql.DB`, jobs table, WAL journal mode, busy timeout, JSON request/response columns, state/lease/attempt fields, and recoverable-job index.
 - **Interactions:** `cmd/master` opens this store from `JOB_STORE_PATH`; `Gateway` creates jobs, marks dispatching, stores successes, stores failures, and replays completed responses.
 
+### `internal/master/job_recovery.go`
+
+- **Name & Responsibility:** Recovers durable jobs after master restart or after dispatch leases expire.
+- **State & Properties:** `JobStore`, dispatch function, optional metrics collector, recovery interval, batch size, lease TTL, and injectable clock for tests.
+- **Interactions:** `cmd/master` starts it as a goroutine. It lists recoverable jobs, dispatches `queued` jobs, requeues recoverable dispatch failures below max attempts, fails jobs at max attempts, and marks expired `dispatching`/`running` jobs as `ambiguous`.
+
 ### `internal/master/registry.go`
 
 - **Name & Responsibility:** In-memory worker registry.
@@ -249,7 +256,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Return Values:** `error` only. Nil means config/cert directories and `master.env` were created successfully.
 - **Error Handling:** Returns flag parse errors and bootstrap validation/write errors.
 - **Side Effects:** Writes status lines to stdout through caller, creates directories/files through `bootstrap.InitMaster`.
-- **Flags:** `--config-dir`, `--cert-dir`, `--port`, `--cleanup-interval`, `--worker-stale-timeout`, `--master-shutdown-timeout`, `--execute-client-allowlist`, `--max-execution-request-bytes`, `--execution-request-cache-ttl`, `--execution-request-cache-max-entries`, `--job-store-path`, `--job-max-attempts`, `--job-lease-ttl`, `--module-host-allowlist`, `--require-module-digest`, `--dev-worker-id`, `--dev-certs`, `--force`.
+- **Flags:** `--config-dir`, `--cert-dir`, `--port`, `--cleanup-interval`, `--worker-stale-timeout`, `--master-shutdown-timeout`, `--execute-client-allowlist`, `--max-execution-request-bytes`, `--execution-request-cache-ttl`, `--execution-request-cache-max-entries`, `--job-store-path`, `--job-max-attempts`, `--job-lease-ttl`, `--job-recovery-interval`, `--job-recovery-batch-size`, `--module-host-allowlist`, `--require-module-digest`, `--dev-worker-id`, `--dev-certs`, `--force`.
 
 ##### `func defaultConfigDir() string`
 
@@ -365,7 +372,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Parameters:** None.
 - **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `WorkerStaleTimeout`, `ShutdownTimeout`, `MinWorkerCPUFree`, `MinWorkerRAMFreeMB`, job store settings, module source policy, and client authorization.
-- **Error Handling:** Invalid or non-positive `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, `EXECUTION_REQUEST_CACHE_TTL`, `EXECUTION_REQUEST_CACHE_MAX_ENTRIES`, `JOB_MAX_ATTEMPTS`, `JOB_LEASE_TTL`, or `MAX_EXECUTION_REQUEST_BYTES`; invalid `AUTO_GENERATE_CERTS` or `REQUIRE_MODULE_DIGEST`; `MIN_WORKER_CPU_FREE` outside `0..100`; negative `MIN_WORKER_RAM_FREE_MB`.
+- **Error Handling:** Invalid or non-positive `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, `EXECUTION_REQUEST_CACHE_TTL`, `EXECUTION_REQUEST_CACHE_MAX_ENTRIES`, `JOB_MAX_ATTEMPTS`, `JOB_LEASE_TTL`, `JOB_RECOVERY_INTERVAL`, `JOB_RECOVERY_BATCH_SIZE`, or `MAX_EXECUTION_REQUEST_BYTES`; invalid `AUTO_GENERATE_CERTS` or `REQUIRE_MODULE_DIGEST`; `MIN_WORKER_CPU_FREE` outside `0..100`; negative `MIN_WORKER_RAM_FREE_MB`.
 - **Side Effects:** Reads process environment.
 
 ##### `func LoadWorker() (WorkerConfig, error)`
@@ -1136,6 +1143,8 @@ The core responsibility is to execute WASM modules on registered workers without
 | `JOB_STORE_PATH` | `./wasmcat-jobs.db` | filesystem path | SQLite database file for durable execution job state. |
 | `JOB_MAX_ATTEMPTS` | `3` | integer count | Maximum synchronous dispatch attempts recorded for one durable job. |
 | `JOB_LEASE_TTL` | `30s` | Go duration | Dispatch lease duration written for durable jobs before worker forwarding. |
+| `JOB_RECOVERY_INTERVAL` | `5s` | Go duration | Frequency for durable job recovery scans. |
+| `JOB_RECOVERY_BATCH_SIZE` | `32` | integer count | Maximum durable jobs processed in one recovery scan. |
 | `MODULE_HOST_ALLOWLIST` | empty | comma-separated hosts | Optional module URL host allowlist for `/api/v1/execute`. Empty allows any host. |
 | `REQUIRE_MODULE_DIGEST` | `false` | Go boolean string | When true, execution requests must include `module_digest` or use a digest-pinned OCI manifest/blob URL. |
 

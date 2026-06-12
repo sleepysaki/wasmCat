@@ -63,7 +63,7 @@ func TestMasterWorkerBinariesExecuteWASMOverMTLS(t *testing.T) {
 
 	waitForFile(t, security.WorkerCertPath(certDir, workerID), 5*time.Second)
 	waitForFile(t, security.WorkerKeyPath(certDir, workerID), 5*time.Second)
-	client := newSmokeMTLSClient(t, certDir, workerID)
+	client := waitForSmokeMTLSClient(t, certDir, workerID, 5*time.Second)
 	waitForReady(t, client, fmt.Sprintf("https://localhost:%s/wasmcat/ready", masterPort), master, 10*time.Second)
 
 	worker := startProcess(t, repoRoot, workerBinary, []string{
@@ -249,6 +249,37 @@ func newSmokeMTLSClient(t *testing.T, certDir string, workerID string) *http.Cli
 	}
 
 	return client
+}
+
+func waitForSmokeMTLSClient(t *testing.T, certDir string, workerID string, timeout time.Duration) *http.Client {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		client, err := newSmokeMTLSClientE(certDir, workerID)
+		if err == nil {
+			return client
+		}
+		lastErr = err
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	t.Fatalf("load smoke mTLS client: %v", lastErr)
+	return nil
+}
+
+func newSmokeMTLSClientE(certDir string, workerID string) (*http.Client, error) {
+	client, err := security.NewMTLSHTTPClient(security.WorkerCertPath(certDir, workerID), security.WorkerKeyPath(certDir, workerID), security.CACertPath(certDir))
+	if err != nil {
+		return nil, err
+	}
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		transport.TLSClientConfig.ServerName = "localhost"
+		transport.TLSClientConfig.MinVersion = tls.VersionTLS12
+	}
+
+	return client, nil
 }
 
 func waitForFile(t *testing.T, path string, timeout time.Duration) {

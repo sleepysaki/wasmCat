@@ -30,6 +30,8 @@ Byte and count limits must be greater than zero. CPU scheduling thresholds must 
 | `JOB_STORE_PATH` | `./wasmcat-jobs.db` | SQLite file used for durable execution job state and persisted successful responses. |
 | `JOB_MAX_ATTEMPTS` | `3` | Maximum synchronous dispatch attempts recorded for one durable job before duplicate retries are rejected. |
 | `JOB_LEASE_TTL` | `30s` | Lease duration written when the master starts dispatching a durable job. Recovery uses this later to identify expired active work. |
+| `JOB_RECOVERY_INTERVAL` | `5s` | How often the master scans durable jobs for queued work and expired leases. |
+| `JOB_RECOVERY_BATCH_SIZE` | `32` | Maximum durable jobs processed during one recovery scan. |
 | `MODULE_HOST_ALLOWLIST` | empty | Comma-separated module URL hosts allowed by `/api/v1/execute`. Empty allows any host. |
 | `REQUIRE_MODULE_DIGEST` | `false` | Require `module_digest` or a digest-pinned OCI manifest/blob URL before dispatch. |
 
