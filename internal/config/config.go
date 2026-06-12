@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"wasmcat/internal/shared"
 )
 
 type Limits struct {
@@ -35,6 +36,9 @@ type MasterConfig struct {
 	MaxExecuteBodyBytes    int64
 	RequestCacheTTL        time.Duration
 	RequestCacheMaxEntries int
+	JobStorePath           string
+	JobMaxAttempts         int
+	JobLeaseTTL            time.Duration
 	ModuleHostAllowlist    []string
 	RequireModuleDigest    bool
 }
@@ -94,6 +98,14 @@ func LoadMaster() (MasterConfig, error) {
 	if err != nil {
 		return MasterConfig{}, err
 	}
+	jobMaxAttempts, err := positiveIntEnv("JOB_MAX_ATTEMPTS", 3)
+	if err != nil {
+		return MasterConfig{}, err
+	}
+	jobLeaseTTL, err := positiveDurationEnv("JOB_LEASE_TTL", 30*time.Second)
+	if err != nil {
+		return MasterConfig{}, err
+	}
 	requireModuleDigest, err := boolEnv("REQUIRE_MODULE_DIGEST", false)
 	if err != nil {
 		return MasterConfig{}, err
@@ -113,6 +125,9 @@ func LoadMaster() (MasterConfig, error) {
 		MaxExecuteBodyBytes:    maxExecuteBodyBytes,
 		RequestCacheTTL:        requestCacheTTL,
 		RequestCacheMaxEntries: requestCacheMaxEntries,
+		JobStorePath:           stringEnv("JOB_STORE_PATH", "./wasmcat-jobs.db"),
+		JobMaxAttempts:         jobMaxAttempts,
+		JobLeaseTTL:            jobLeaseTTL,
 		ModuleHostAllowlist:    listEnv("MODULE_HOST_ALLOWLIST"),
 		RequireModuleDigest:    requireModuleDigest,
 	}
@@ -170,7 +185,7 @@ func LoadWorker() (WorkerConfig, error) {
 		Port:              port,
 		NodeID:            nodeID,
 		MasterURL:         stringEnv("MASTER_URL", "https://localhost:7270"),
-		AdvertiseAddress:  stringEnv("WORKER_ADVERTISE_ADDRESS", "localhost:"+port),
+		AdvertiseAddress:  stringEnv("WORKER_ADVERTISE_ADDRESS", shared.DefaultWorkerAdvertiseAddress(port)),
 		Latitude:          latitude,
 		Longitude:         longitude,
 		CertDir:           stringEnv("CERT_DIR", "./certs"),

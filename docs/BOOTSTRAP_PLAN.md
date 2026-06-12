@@ -90,7 +90,7 @@ sudo wasmcat-worker init \
   --cert-dir /etc/wasmcat/certs
 ```
 
-The worker command validates that `MASTER_URL` is an HTTPS URL and writes the same location and limit settings used by the worker runtime.
+The worker command validates that `MASTER_URL` is an HTTPS URL and writes the same location and limit settings used by the worker runtime. If `--advertise-address` is omitted, the generated value defaults to `<hostname>:<worker-port>` and falls back to `localhost:<worker-port>` only when the OS hostname cannot be read.
 
 Operators must provide:
 

@@ -15,7 +15,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Coordinator pattern:** `master.Dispatcher` coordinates registry lookup, ACR resolution, worker selection, conservative rescheduling, and mTLS forwarding.
 - **Strategy-like scheduling:** `master.Scheduler` isolates worker selection logic. The current strategy filters workers below configured CPU/RAM thresholds, then chooses the nearest eligible worker using Haversine distance.
 - **Dependency injection:** `Gateway`, `Dispatcher`, and `WorkerServer` receive dependencies as struct fields, which also makes handler tests possible.
-- **In-memory registry/cache:** Worker state is held in `Registry.workers`; compiled modules are held in `WasmEngine.cache`.
+- **In-memory registry/cache:** Worker state is held in `Registry.workers`; compiled modules are held in `WasmEngine.cache`. Execution jobs are persisted in SQLite when the master runs with a `JobStore`.
 - **Event-loop background tasks:** Master cleanup and worker telemetry run on tickers controlled by cancellation contexts.
 - **Native release packaging:** `scripts/build.*`, systemd templates, and GitHub release workflow distribute binaries and service files.
 
@@ -39,7 +39,7 @@ The core responsibility is to execute WASM modules on registered workers without
 2. If `init` is present, `runInit` parses flags and calls `bootstrap.InitWorker`, then exits.
 3. Normal startup calls `logging.Configure("worker")`.
 4. `signal.NotifyContext` creates a cancellable root context.
-5. `config.LoadWorker` reads worker identity, master URL, cert path, heartbeat interval, and execution limits.
+5. `config.LoadWorker` reads worker identity, master URL, cert path, heartbeat interval, and execution limits. When `WORKER_ADVERTISE_ADDRESS` is unset, it defaults to `<hostname>:<worker-port>` and falls back to `localhost:<worker-port>` only if the OS hostname cannot be read.
 6. `worker.NewWasmEngineWithLimits` creates a wazero runtime, digest-aware compiled module cache, mutex, in-flight compile tracker, and execution semaphore.
 7. `WorkerServer` is constructed with the engine, node ID, and certificate directory.
 8. `StartTelemetry` runs in a goroutine, registering the worker with configured latitude/longitude and sending periodic CPU/RAM heartbeats over mTLS.
@@ -49,7 +49,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 1. Client sends JSON to `POST /api/v1/execute` on the master.
 2. `Gateway.handleExecute` decodes `shared.ExecutionRequest`, calls `ExecutionRequest.Validate`, applies module source policy, and preserves or creates `request_id`.
-3. The gateway checks `ExecutionRequestTracker`. New IDs are marked in-flight, matching completed IDs return cached responses, matching in-flight IDs return `409 request_in_progress`, and reused IDs with different request content return `409 request_id_conflict`.
+3. The gateway persists a durable job when `JobStore` is configured. New IDs create `queued` jobs, matching completed IDs return stored responses, active IDs return `409 request_in_progress`, and reused IDs with different request content return `409 request_id_conflict`. Handler-only paths without a job store fall back to `ExecutionRequestTracker`.
 4. `Dispatcher.Dispatch` normalizes module URL fields.
 5. If the URL points at `*.azurecr.io`, the dispatcher:
    - parses the ACR reference,
@@ -62,7 +62,7 @@ The core responsibility is to execute WASM modules on registered workers without
 8. `Dispatcher.forwardToWorker` sends the request, including `request_id`, to `https://<worker>/invoke` over mTLS. If the selected worker has a transport error or returns `502`, `503`, or `504`, the dispatcher removes that worker from the candidate list and selects another worker. It does not reschedule worker execution errors such as `400 execution_failed`, `400 module_digest_invalid`, or `400 module_digest_mismatch`.
 9. `WorkerServer.handleInvoke` limits request body size, decodes and validates the request, then calls `WasmEngine.ExecuteWithDigest`.
 10. `WasmEngine.ExecuteWithDigest` enforces payload and concurrency limits, fetches/compiles the module if needed, verifies `module_digest` when supplied, instantiates a fresh module instance, writes payload bytes into WASM memory, calls exported `run(ptr, len)`, reads output bytes, and returns a string.
-11. Worker returns `shared.ExecutionResponse` with `request_id` and `execution_time_ms`; master fills `ExecutedOnNodeID` if needed, stores successful responses in the request tracker, and returns the response to the client.
+11. Worker returns `shared.ExecutionResponse` with `request_id` and `execution_time_ms`; master fills `ExecutedOnNodeID` if needed, stores successful responses in the durable job store or request tracker, and returns the response to the client.
 
 ## 2. Component & Module Breakdown
 
@@ -135,14 +135,32 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/master/gateway.go`
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
-- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, `Gateway.Requests`, optional `Gateway.ExecuteClientIDs`, module source policy, request body limit, request cache TTL, request cache max entries, and graceful shutdown timeout.
-- **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain, validates execution client certificate identity when configured, checks request idempotency state, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
+- **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, optional `Gateway.Requests`, optional durable `Gateway.JobStore`, optional `Gateway.ExecuteClientIDs`, module source policy, request body limit, request cache settings, job retry/lease settings, and graceful shutdown timeout.
+- **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain, validates execution client certificate identity when configured, checks durable or in-memory request idempotency state, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
 
 ### `internal/master/request_tracker.go`
 
 - **Name & Responsibility:** Provides process-local idempotency tracking for `/api/v1/execute` requests.
 - **State & Properties:** Mutex-protected map keyed by `request_id`, request fingerprints, in-flight/completed state, cached successful `ExecutionResponse`, TTL, max entry count, eviction/expiration counters, and clock function.
-- **Interactions:** `Gateway.handleExecute` calls `Begin`, `Complete`, and `Forget` to reject concurrent duplicates, return cached successes, detect request ID conflicts, and allow retries after dispatch failures.
+- **Interactions:** Handler-only and no-store gateway paths call `Begin`, `Complete`, and `Forget` to reject concurrent duplicates, return cached successes, detect request ID conflicts, and allow retries after dispatch failures. Normal master startup uses the durable job store path.
+
+### `internal/master/job.go`
+
+- **Name & Responsibility:** Defines durable execution job records and state names.
+- **State & Properties:** `JobRecord` stores request ID, execution fingerprint, original request, status, worker ID, attempt count, max attempts, lease time, last error, optional response, and timestamps.
+- **Interactions:** `Gateway.handleExecute` creates records before dispatch; `JobStore` implementations persist and transition records.
+
+### `internal/master/job_store.go`
+
+- **Name & Responsibility:** Defines the persistence boundary for durable execution jobs.
+- **State & Properties:** `JobStore` interface and sentinel errors for missing/existing jobs.
+- **Interactions:** Gateway depends on this interface rather than a concrete database. SQLite is the first implementation.
+
+### `internal/master/sqlite_job_store.go`
+
+- **Name & Responsibility:** Persists durable jobs in a local SQLite database.
+- **State & Properties:** `database/sql.DB`, jobs table, WAL journal mode, busy timeout, JSON request/response columns, state/lease/attempt fields, and recoverable-job index.
+- **Interactions:** `cmd/master` opens this store from `JOB_STORE_PATH`; `Gateway` creates jobs, marks dispatching, stores successes, stores failures, and replays completed responses.
 
 ### `internal/master/registry.go`
 
@@ -231,7 +249,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Return Values:** `error` only. Nil means config/cert directories and `master.env` were created successfully.
 - **Error Handling:** Returns flag parse errors and bootstrap validation/write errors.
 - **Side Effects:** Writes status lines to stdout through caller, creates directories/files through `bootstrap.InitMaster`.
-- **Flags:** `--config-dir`, `--cert-dir`, `--port`, `--cleanup-interval`, `--worker-stale-timeout`, `--master-shutdown-timeout`, `--execute-client-allowlist`, `--module-host-allowlist`, `--require-module-digest`, `--dev-worker-id`, `--dev-certs`, `--force`.
+- **Flags:** `--config-dir`, `--cert-dir`, `--port`, `--cleanup-interval`, `--worker-stale-timeout`, `--master-shutdown-timeout`, `--execute-client-allowlist`, `--max-execution-request-bytes`, `--execution-request-cache-ttl`, `--execution-request-cache-max-entries`, `--job-store-path`, `--job-max-attempts`, `--job-lease-ttl`, `--module-host-allowlist`, `--require-module-digest`, `--dev-worker-id`, `--dev-certs`, `--force`.
 
 ##### `func defaultConfigDir() string`
 
@@ -346,8 +364,8 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func LoadMaster() (MasterConfig, error)`
 
 - **Parameters:** None.
-- **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `WorkerStaleTimeout`, `ShutdownTimeout`, `MinWorkerCPUFree`, `MinWorkerRAMFreeMB`, `ModuleHostAllowlist`, and `RequireModuleDigest`.
-- **Error Handling:** Invalid or non-positive `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, `EXECUTION_REQUEST_CACHE_TTL`, `EXECUTION_REQUEST_CACHE_MAX_ENTRIES`, or `MAX_EXECUTION_REQUEST_BYTES`; invalid `AUTO_GENERATE_CERTS` or `REQUIRE_MODULE_DIGEST`; `MIN_WORKER_CPU_FREE` outside `0..100`; negative `MIN_WORKER_RAM_FREE_MB`.
+- **Return Values:** `MasterConfig` with `Port`, `CertDir`, `AutoGenerateCerts`, `WorkerIDForCert`, `CleanupInterval`, `WorkerStaleTimeout`, `ShutdownTimeout`, `MinWorkerCPUFree`, `MinWorkerRAMFreeMB`, job store settings, module source policy, and client authorization.
+- **Error Handling:** Invalid or non-positive `CLEANUP_INTERVAL`, `WORKER_STALE_TIMEOUT`, `MASTER_SHUTDOWN_TIMEOUT`, `EXECUTION_REQUEST_CACHE_TTL`, `EXECUTION_REQUEST_CACHE_MAX_ENTRIES`, `JOB_MAX_ATTEMPTS`, `JOB_LEASE_TTL`, or `MAX_EXECUTION_REQUEST_BYTES`; invalid `AUTO_GENERATE_CERTS` or `REQUIRE_MODULE_DIGEST`; `MIN_WORKER_CPU_FREE` outside `0..100`; negative `MIN_WORKER_RAM_FREE_MB`.
 - **Side Effects:** Reads process environment.
 
 ##### `func LoadWorker() (WorkerConfig, error)`
@@ -1115,6 +1133,9 @@ The core responsibility is to execute WASM modules on registered workers without
 | `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | integer bytes | Maximum JSON body size accepted by master `/api/v1/execute`. |
 | `EXECUTION_REQUEST_CACHE_TTL` | `5m` | Go duration | How long successful execution responses remain cached by `request_id`. |
 | `EXECUTION_REQUEST_CACHE_MAX_ENTRIES` | `4096` | integer count | Maximum in-memory request records kept by the master idempotency tracker. |
+| `JOB_STORE_PATH` | `./wasmcat-jobs.db` | filesystem path | SQLite database file for durable execution job state. |
+| `JOB_MAX_ATTEMPTS` | `3` | integer count | Maximum synchronous dispatch attempts recorded for one durable job. |
+| `JOB_LEASE_TTL` | `30s` | Go duration | Dispatch lease duration written for durable jobs before worker forwarding. |
 | `MODULE_HOST_ALLOWLIST` | empty | comma-separated hosts | Optional module URL host allowlist for `/api/v1/execute`. Empty allows any host. |
 | `REQUIRE_MODULE_DIGEST` | `false` | Go boolean string | When true, execution requests must include `module_digest` or use a digest-pinned OCI manifest/blob URL. |
 
@@ -1125,7 +1146,7 @@ The core responsibility is to execute WASM modules on registered workers without
 | `WORKER_ID` | `worker-vn-01` | string | Stable worker node ID and certificate filename suffix. |
 | `WORKER_PORT` | `7271` | TCP port string | HTTPS listen port for worker invocation server. |
 | `MASTER_URL` | `https://localhost:7270` | HTTPS URL | Master gateway URL used by telemetry. |
-| `WORKER_ADVERTISE_ADDRESS` | `localhost:<WORKER_PORT>` | host:port or URL | Address stored in registry and used by master dispatch. |
+| `WORKER_ADVERTISE_ADDRESS` | `<hostname>:<WORKER_PORT>` | host:port or URL | Address stored in registry and used by master dispatch. Falls back to `localhost:<WORKER_PORT>` only if the OS hostname is unavailable. |
 | `WORKER_LATITUDE` | `0` | float degrees, `-90` to `90` | Worker latitude stored during registration and used for distance scheduling. |
 | `WORKER_LONGITUDE` | `0` | float degrees, `-180` to `180` | Worker longitude stored during registration and used for distance scheduling. |
 | `CERT_DIR` | `./certs` | Filesystem path | Directory containing `ca.crt`, `worker-<id>.crt`, and `worker-<id>.key`. |
@@ -1256,12 +1277,11 @@ output_len = uint32(result)
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
 - **Cold fetch coalescing is process-local:** Concurrent cold requests for the same cache key share one download/compile inside a worker process. Separate workers still compile independently.
-- **Request idempotency is process-local:** `request_id` prevents concurrent duplicate dispatch and caches successful responses for `EXECUTION_REQUEST_CACHE_TTL`, bounded by `EXECUTION_REQUEST_CACHE_MAX_ENTRIES`, but the cache is in memory and is cleared on master restart.
+- **Durable job reliability is partial:** normal master startup persists accepted jobs and successful responses in SQLite, so duplicate completed `request_id` calls can survive restart. Recovery loops, async job APIs, and worker completion callbacks are still future HA phases.
 - **Health/readiness require mTLS:** Because TLS client auth is configured at server level, probes must present valid client certificates unless TLS routing changes.
 - **Development cert generation overwrites at runtime:** `GenerateCAAndCerts` uses `os.Create`. Production should set `AUTO_GENERATE_CERTS=false`; bootstrap protects generated files unless `--force` is used.
 - **Telemetry is host-level, not cgroup-level:** gopsutil reports host CPU and memory. It does not currently account for per-service cgroup quotas.
-- **No persistent state:** Registry and module cache are in memory. Master restart loses worker registry; worker restart loses compiled module cache.
-- **No durable request ledger:** Master restart also loses completed request ID history. Multiple master instances do not share idempotency state.
+- **Some state remains process-local:** Registry and module cache are in memory. Master restart loses worker registry; worker restart loses compiled module cache. Multiple master instances still need a shared backend or leader protocol before active-active HA is safe.
 - **Execution authorization allowlist is optional:** If `EXECUTE_CLIENT_ALLOWLIST` is empty, any valid client certificate trusted by the CA can call `/api/v1/execute`.
 - **Module source policy is optional:** If `MODULE_HOST_ALLOWLIST` is empty and `REQUIRE_MODULE_DIGEST=false`, trusted execution clients can submit any HTTP(S) module URL.
 - **WASM ABI is narrow:** Modules must match the exact `memory`, `malloc`, and packed `run` ABI. WASI modules or modules with different host imports are not supported by the current engine path.
@@ -1273,7 +1293,7 @@ output_len = uint32(result)
 - Use stable, unique `WORKER_ID` values because certificate filenames depend on them.
 - Set worker coordinates explicitly so distance scheduling has meaningful data.
 - Set capacity thresholds to prevent overloaded workers from receiving new executions.
-- Ensure `WORKER_ADVERTISE_ADDRESS` is reachable from the master.
+- Ensure `WORKER_ADVERTISE_ADDRESS` is reachable from the master. Set it explicitly when the host's OS hostname is not resolvable from the master network.
 - Prefer immutable module digests so workers can distinguish changed module content even when names or tags are reused.
 - Keep `MAX_CONCURRENT_EXECS` aligned with CPU and memory capacity of each worker host.
 - Add mTLS-capable health checks in service monitoring.

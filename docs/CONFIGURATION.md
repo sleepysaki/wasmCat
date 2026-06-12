@@ -27,6 +27,9 @@ Byte and count limits must be greater than zero. CPU scheduling thresholds must 
 | `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | Maximum JSON body size accepted by the master `/api/v1/execute` endpoint. |
 | `EXECUTION_REQUEST_CACHE_TTL` | `5m` | How long successful `/api/v1/execute` responses are cached by `request_id` for duplicate client retries. |
 | `EXECUTION_REQUEST_CACHE_MAX_ENTRIES` | `4096` | Maximum in-memory request records kept by the master idempotency tracker. Completed records are evicted before in-flight records. |
+| `JOB_STORE_PATH` | `./wasmcat-jobs.db` | SQLite file used for durable execution job state and persisted successful responses. |
+| `JOB_MAX_ATTEMPTS` | `3` | Maximum synchronous dispatch attempts recorded for one durable job before duplicate retries are rejected. |
+| `JOB_LEASE_TTL` | `30s` | Lease duration written when the master starts dispatching a durable job. Recovery uses this later to identify expired active work. |
 | `MODULE_HOST_ALLOWLIST` | empty | Comma-separated module URL hosts allowed by `/api/v1/execute`. Empty allows any host. |
 | `REQUIRE_MODULE_DIGEST` | `false` | Require `module_digest` or a digest-pinned OCI manifest/blob URL before dispatch. |
 
@@ -37,13 +40,15 @@ Byte and count limits must be greater than zero. CPU scheduling thresholds must 
 | `WORKER_ID` | `worker-vn-01` | Worker node ID. |
 | `WORKER_PORT` | `7271` | HTTPS port for the worker invoke server. |
 | `MASTER_URL` | `https://localhost:7270` | Master URL used for registration and heartbeat. |
-| `WORKER_ADVERTISE_ADDRESS` | `localhost:<worker-port>` | Address the master uses to call this worker. |
+| `WORKER_ADVERTISE_ADDRESS` | `<hostname>:<worker-port>` | Address the master uses to call this worker. If the OS hostname cannot be read, the fallback is `localhost:<worker-port>`. |
 | `WORKER_LATITUDE` | `0` | Worker latitude used by the scheduler. Must be between `-90` and `90`. |
 | `WORKER_LONGITUDE` | `0` | Worker longitude used by the scheduler. Must be between `-180` and `180`. |
 | `CERT_DIR` | `./certs` | Directory containing `ca.crt`, `worker-<id>.crt`, and `worker-<id>.key`. |
 | `HEARTBEAT_INTERVAL` | `5s` | Worker registration and heartbeat interval. |
 
 Worker registration and heartbeat require the mTLS client certificate identity to match `WORKER_ID`. The master accepts a certificate common name of `wasmcat-worker-<WORKER_ID>` or a DNS SAN containing either `<WORKER_ID>` or `wasmcat-worker-<WORKER_ID>`.
+
+Set `WORKER_ADVERTISE_ADDRESS` explicitly in production when the OS hostname is not resolvable from the master, such as private IP deployments, split DNS, NAT, or custom service discovery. Use `localhost:<port>` only for same-host development.
 
 ## Worker Limits
 

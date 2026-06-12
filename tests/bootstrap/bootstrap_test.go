@@ -7,6 +7,7 @@ import (
 	"testing"
 	"wasmcat/internal/bootstrap"
 	"wasmcat/internal/security"
+	"wasmcat/internal/shared"
 )
 
 func TestInitMasterWritesProductionEnv(t *testing.T) {
@@ -26,6 +27,9 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 		MaxExecuteBodyBytes:    4096,
 		RequestCacheTTL:        "2m",
 		RequestCacheMaxEntries: 17,
+		JobStorePath:           filepath.Join(configDir, "jobs.db"),
+		JobMaxAttempts:         5,
+		JobLeaseTTL:            "45s",
 		ModuleHostAllowlist:    "modules.internal,registry.azurecr.io",
 		RequireModuleDigest:    true,
 		DevWorkerID:            "worker-test-01",
@@ -55,6 +59,9 @@ func TestInitMasterWritesProductionEnv(t *testing.T) {
 	assertContains(t, env, "MAX_EXECUTION_REQUEST_BYTES=4096\n")
 	assertContains(t, env, "EXECUTION_REQUEST_CACHE_TTL=2m\n")
 	assertContains(t, env, "EXECUTION_REQUEST_CACHE_MAX_ENTRIES=17\n")
+	assertContains(t, env, "JOB_STORE_PATH="+filepath.Join(configDir, "jobs.db")+"\n")
+	assertContains(t, env, "JOB_MAX_ATTEMPTS=5\n")
+	assertContains(t, env, "JOB_LEASE_TTL=45s\n")
 	assertContains(t, env, "MODULE_HOST_ALLOWLIST=modules.internal,registry.azurecr.io\n")
 	assertContains(t, env, "REQUIRE_MODULE_DIGEST=true\n")
 }
@@ -132,6 +139,18 @@ func TestInitMasterRejectsInvalidCapacityThresholds(t *testing.T) {
 				RequestCacheMaxEntries: -1,
 			},
 		},
+		{
+			name: "non-positive job max attempts",
+			options: bootstrap.MasterOptions{
+				JobMaxAttempts: -1,
+			},
+		},
+		{
+			name: "non-positive job lease ttl",
+			options: bootstrap.MasterOptions{
+				JobLeaseTTL: "0s",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -207,6 +226,30 @@ func TestInitWorkerWritesEnv(t *testing.T) {
 	assertContains(t, env, "MAX_CACHED_MODULES=16\n")
 	assertContains(t, env, "MAX_CACHE_BYTES=67108864\n")
 	assertContains(t, env, "MODULE_CACHE_TTL=10m\n")
+}
+
+func TestInitWorkerDefaultsAdvertiseAddressFromHostname(t *testing.T) {
+	configDir := t.TempDir()
+	certDir := filepath.Join(configDir, "certs")
+
+	result, err := bootstrap.InitWorker(bootstrap.WorkerOptions{
+		ConfigDir:          configDir,
+		CertDir:            certDir,
+		Port:               "9444",
+		MasterURL:          "https://master.example.com:7270",
+		MaxModuleBytes:     10 << 20,
+		MaxPayloadBytes:    1 << 20,
+		MaxOutputBytes:     1 << 20,
+		MaxConcurrentExecs: 4,
+		MaxCachedModules:   8,
+		MaxCacheBytes:      32 << 20,
+	})
+	if err != nil {
+		t.Fatalf("InitWorker returned error: %v", err)
+	}
+
+	env := readFile(t, result.ConfigPath)
+	assertContains(t, env, "WORKER_ADVERTISE_ADDRESS="+shared.DefaultWorkerAdvertiseAddress("9444")+"\n")
 }
 
 func TestInitWorkerRejectsInvalidMasterURL(t *testing.T) {

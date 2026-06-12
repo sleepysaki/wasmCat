@@ -1,9 +1,11 @@
 package config_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 	"wasmcat/internal/config"
+	"wasmcat/internal/shared"
 )
 
 func TestLoadWorkerReadsEnvironment(t *testing.T) {
@@ -144,6 +146,9 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	t.Setenv("MAX_EXECUTION_REQUEST_BYTES", "4096")
 	t.Setenv("EXECUTION_REQUEST_CACHE_TTL", "2m")
 	t.Setenv("EXECUTION_REQUEST_CACHE_MAX_ENTRIES", "17")
+	t.Setenv("JOB_STORE_PATH", "C:\\wasmcat\\jobs.db")
+	t.Setenv("JOB_MAX_ATTEMPTS", "5")
+	t.Setenv("JOB_LEASE_TTL", "45s")
 	t.Setenv("MODULE_HOST_ALLOWLIST", "modules.internal, registry.azurecr.io ")
 	t.Setenv("REQUIRE_MODULE_DIGEST", "true")
 
@@ -184,6 +189,15 @@ func TestLoadMasterReadsCertificateEnvironment(t *testing.T) {
 	}
 	if cfg.RequestCacheMaxEntries != 17 {
 		t.Fatalf("expected request cache max entries 17, got %d", cfg.RequestCacheMaxEntries)
+	}
+	if cfg.JobStorePath != "C:\\wasmcat\\jobs.db" {
+		t.Fatalf("expected job store path, got %q", cfg.JobStorePath)
+	}
+	if cfg.JobMaxAttempts != 5 {
+		t.Fatalf("expected job max attempts 5, got %d", cfg.JobMaxAttempts)
+	}
+	if cfg.JobLeaseTTL != 45*time.Second {
+		t.Fatalf("expected job lease ttl 45s, got %s", cfg.JobLeaseTTL)
 	}
 	if len(cfg.ModuleHostAllowlist) != 2 || cfg.ModuleHostAllowlist[0] != "modules.internal" || cfg.ModuleHostAllowlist[1] != "registry.azurecr.io" {
 		t.Fatalf("unexpected module host allowlist: %+v", cfg.ModuleHostAllowlist)
@@ -252,12 +266,52 @@ func TestLoadMasterRejectsNonPositiveRequestCacheMaxEntries(t *testing.T) {
 	}
 }
 
+func TestLoadMasterRejectsInvalidJobReliabilitySettings(t *testing.T) {
+	tests := []struct {
+		name  string
+		env   string
+		value string
+	}{
+		{name: "non-positive attempts", env: "JOB_MAX_ATTEMPTS", value: "0"},
+		{name: "invalid lease ttl", env: "JOB_LEASE_TTL", value: "soon"},
+		{name: "non-positive lease ttl", env: "JOB_LEASE_TTL", value: "0s"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tt.env, tt.value)
+
+			_, err := config.LoadMaster()
+			if err == nil {
+				t.Fatalf("expected invalid %s error", tt.env)
+			}
+		})
+	}
+}
+
 func TestLoadWorkerRejectsInvalidCoordinates(t *testing.T) {
 	t.Setenv("WORKER_LATITUDE", "north")
 
 	_, err := config.LoadWorker()
 	if err == nil {
 		t.Fatal("expected invalid latitude error")
+	}
+}
+
+func TestLoadWorkerDefaultsAdvertiseAddressFromHostname(t *testing.T) {
+	t.Setenv("WORKER_PORT", "9444")
+
+	cfg, err := config.LoadWorker()
+	if err != nil {
+		t.Fatalf("LoadWorker returned error: %v", err)
+	}
+
+	expected := shared.DefaultWorkerAdvertiseAddress("9444")
+	if cfg.AdvertiseAddress != expected {
+		t.Fatalf("expected default advertise address %q, got %q", expected, cfg.AdvertiseAddress)
+	}
+	if !strings.HasSuffix(cfg.AdvertiseAddress, ":9444") {
+		t.Fatalf("expected default advertise address to include worker port, got %q", cfg.AdvertiseAddress)
 	}
 }
 

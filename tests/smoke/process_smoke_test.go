@@ -55,6 +55,7 @@ func TestMasterWorkerBinariesExecuteWASMOverMTLS(t *testing.T) {
 		"AUTO_GENERATE_CERTS=true",
 		"DEV_WORKER_ID=" + workerID,
 		"CLEANUP_INTERVAL=1s",
+		"JOB_STORE_PATH=" + filepath.Join(tempDir, "wasmcat-jobs.db"),
 		"MIN_WORKER_CPU_FREE=0",
 		"MIN_WORKER_RAM_FREE_MB=0",
 	})

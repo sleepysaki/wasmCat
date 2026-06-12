@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"wasmcat/internal/security"
+	"wasmcat/internal/shared"
 )
 
 type MasterOptions struct {
@@ -24,6 +25,9 @@ type MasterOptions struct {
 	MaxExecuteBodyBytes    int64
 	RequestCacheTTL        string
 	RequestCacheMaxEntries int
+	JobStorePath           string
+	JobMaxAttempts         int
+	JobLeaseTTL            string
 	ModuleHostAllowlist    string
 	RequireModuleDigest    bool
 	DevWorkerID            string
@@ -97,6 +101,9 @@ func InitMaster(options MasterOptions) (Result, error) {
 		{"MAX_EXECUTION_REQUEST_BYTES", strconv.FormatInt(options.MaxExecuteBodyBytes, 10)},
 		{"EXECUTION_REQUEST_CACHE_TTL", options.RequestCacheTTL},
 		{"EXECUTION_REQUEST_CACHE_MAX_ENTRIES", strconv.Itoa(options.RequestCacheMaxEntries)},
+		{"JOB_STORE_PATH", options.JobStorePath},
+		{"JOB_MAX_ATTEMPTS", strconv.Itoa(options.JobMaxAttempts)},
+		{"JOB_LEASE_TTL", options.JobLeaseTTL},
 		{"MODULE_HOST_ALLOWLIST", options.ModuleHostAllowlist},
 		{"REQUIRE_MODULE_DIGEST", strconv.FormatBool(options.RequireModuleDigest)},
 	}
@@ -180,6 +187,15 @@ func normalizeMaster(options MasterOptions) MasterOptions {
 	if options.RequestCacheMaxEntries == 0 {
 		options.RequestCacheMaxEntries = 4096
 	}
+	if options.JobStorePath == "" {
+		options.JobStorePath = filepath.Join(options.ConfigDir, "wasmcat-jobs.db")
+	}
+	if options.JobMaxAttempts == 0 {
+		options.JobMaxAttempts = 3
+	}
+	if options.JobLeaseTTL == "" {
+		options.JobLeaseTTL = "30s"
+	}
 	if options.DevWorkerID == "" {
 		options.DevWorkerID = "worker-vn-01"
 	}
@@ -204,7 +220,7 @@ func normalizeWorker(options WorkerOptions) WorkerOptions {
 		options.MasterURL = "https://localhost:7270"
 	}
 	if options.AdvertiseAddress == "" {
-		options.AdvertiseAddress = "localhost:" + options.Port
+		options.AdvertiseAddress = shared.DefaultWorkerAdvertiseAddress(options.Port)
 	}
 	if options.HeartbeatInterval == "" {
 		options.HeartbeatInterval = "5s"
@@ -264,6 +280,15 @@ func validateMaster(options MasterOptions) error {
 	}
 	if options.RequestCacheMaxEntries <= 0 {
 		return fmt.Errorf("execution request cache max entries must be greater than zero")
+	}
+	if strings.TrimSpace(options.JobStorePath) == "" {
+		return fmt.Errorf("job store path is required")
+	}
+	if options.JobMaxAttempts <= 0 {
+		return fmt.Errorf("job max attempts must be greater than zero")
+	}
+	if err := validatePositiveDuration("job lease ttl", options.JobLeaseTTL); err != nil {
+		return fmt.Errorf("parse job lease ttl: %w", err)
 	}
 
 	return nil

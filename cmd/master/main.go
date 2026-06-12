@@ -55,6 +55,14 @@ func main() {
 
 	metrics := shared.NewMetrics()
 
+	jobStore, err := master.NewSQLiteJobStore(ctx, cfg.JobStorePath)
+	if err != nil {
+		slog.Error("failed to open durable job store", "path", cfg.JobStorePath, "error", err)
+		return
+	}
+	defer jobStore.Close()
+	slog.Info("durable job store initialized", "path", cfg.JobStorePath, "max_attempts", cfg.JobMaxAttempts, "lease_ttl", cfg.JobLeaseTTL.String())
+
 	// Create the Dispatcher, need both the Registry and the Scheduler
 	dispatch := &master.Dispatcher{
 		Registry:  reg,
@@ -74,6 +82,9 @@ func main() {
 		MaxExecuteBodyBytes:    cfg.MaxExecuteBodyBytes,
 		RequestCacheTTL:        cfg.RequestCacheTTL,
 		RequestCacheMaxEntries: cfg.RequestCacheMaxEntries,
+		JobStore:               jobStore,
+		JobMaxAttempts:         cfg.JobMaxAttempts,
+		JobLeaseTTL:            cfg.JobLeaseTTL,
 		ModulePolicy: master.ModulePolicy{
 			AllowedHosts:  cfg.ModuleHostAllowlist,
 			RequireDigest: cfg.RequireModuleDigest,
@@ -140,6 +151,9 @@ func runInit(args []string) error {
 	maxExecuteBodyBytes := flags.Int64("max-execution-request-bytes", 2<<20, "maximum JSON body size accepted by /api/v1/execute")
 	requestCacheTTL := flags.String("execution-request-cache-ttl", "5m", "how long successful request_id responses are cached for duplicate requests")
 	requestCacheMaxEntries := flags.Int("execution-request-cache-max-entries", 4096, "maximum in-memory request_id entries kept by the master")
+	jobStorePath := flags.String("job-store-path", "", "SQLite file path for durable job state; defaults to <config-dir>/wasmcat-jobs.db")
+	jobMaxAttempts := flags.Int("job-max-attempts", 3, "maximum synchronous dispatch attempts recorded for one durable job")
+	jobLeaseTTL := flags.String("job-lease-ttl", "30s", "how long a dispatching job lease remains valid for recovery")
 	moduleHostAllowlist := flags.String("module-host-allowlist", "", "comma-separated module URL hosts allowed by the master; empty allows any host")
 	requireModuleDigest := flags.Bool("require-module-digest", false, "require execution requests to include a module digest or digest-pinned OCI URL")
 	devWorkerID := flags.String("dev-worker-id", "worker-vn-01", "worker ID used when generating development certificates")
@@ -163,6 +177,9 @@ func runInit(args []string) error {
 		MaxExecuteBodyBytes:    *maxExecuteBodyBytes,
 		RequestCacheTTL:        *requestCacheTTL,
 		RequestCacheMaxEntries: *requestCacheMaxEntries,
+		JobStorePath:           *jobStorePath,
+		JobMaxAttempts:         *jobMaxAttempts,
+		JobLeaseTTL:            *jobLeaseTTL,
 		ModuleHostAllowlist:    *moduleHostAllowlist,
 		RequireModuleDigest:    *requireModuleDigest,
 		DevWorkerID:            *devWorkerID,

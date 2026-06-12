@@ -31,6 +31,7 @@ type Gateway struct {
 	CertDir    string
 	Metrics    *shared.Metrics
 	Requests   *ExecutionRequestTracker
+	JobStore   JobStore
 
 	// ExecuteClientIDs is optional. When empty, any trusted mTLS client can call
 	// /api/v1/execute. When set, the caller certificate must match one of these
@@ -41,6 +42,8 @@ type Gateway struct {
 	ModulePolicy           ModulePolicy
 	RequestCacheTTL        time.Duration
 	RequestCacheMaxEntries int
+	JobMaxAttempts         int
+	JobLeaseTTL            time.Duration
 	// How long the master waits for active HTTP requests after SIGINT/SIGTERM.
 	// This protects shutdown from hanging forever while still giving in-flight requests a chance to finish.
 	ShutdownTimeout time.Duration
@@ -301,6 +304,11 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 	req.RequestID = requestID
 
+	if g.JobStore != nil {
+		g.handleDurableExecute(w, r, req)
+		return
+	}
+
 	requestStatus, err := g.requests().Begin(req)
 	if err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
@@ -334,6 +342,101 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	g.metrics().IncDispatchSuccess()
 
 	shared.WriteJSON(w, http.StatusOK, result)
+}
+
+func (g *Gateway) handleDurableExecute(w http.ResponseWriter, r *http.Request, req shared.ExecutionRequest) {
+	ctx := r.Context()
+
+	job, started, ok := g.beginDurableJob(ctx, w, req)
+	if !ok {
+		return
+	}
+	if !started {
+		// beginDurableJob already wrote the duplicate/conflict response.
+		_ = job
+		return
+	}
+
+	leaseUntil := time.Now().Add(g.jobLeaseTTL())
+	if err := g.JobStore.MarkDispatching(ctx, req.RequestID, "", leaseUntil); err != nil {
+		g.metrics().IncDispatchFailure()
+		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", err)
+		return
+	}
+
+	g.attachDispatcherMetrics()
+	result, err := g.Dispatcher.Dispatch(ctx, req)
+	if err != nil {
+		_ = g.JobStore.MarkFailed(context.Background(), req.RequestID, err.Error())
+		g.metrics().IncDispatchFailure()
+		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", err)
+		return
+	}
+	if err := g.JobStore.MarkSucceeded(context.Background(), req.RequestID, result); err != nil {
+		g.metrics().IncDispatchFailure()
+		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", err)
+		return
+	}
+	g.metrics().IncDispatchSuccess()
+
+	shared.WriteJSON(w, http.StatusOK, result)
+}
+
+func (g *Gateway) beginDurableJob(ctx context.Context, w http.ResponseWriter, req shared.ExecutionRequest) (JobRecord, bool, bool) {
+	fingerprint, err := ExecutionJobFingerprint(req)
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+		return JobRecord{}, false, false
+	}
+
+	now := time.Now()
+	job := NewJobRecord(req, fingerprint, g.jobMaxAttempts(), now)
+	if err := g.JobStore.Create(ctx, job); err == nil {
+		return job, true, true
+	} else if !errors.Is(err, ErrJobExists) {
+		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", err)
+		return JobRecord{}, false, false
+	}
+
+	existing, err := g.JobStore.Get(ctx, req.RequestID)
+	if err != nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", err)
+		return JobRecord{}, false, false
+	}
+	if existing.Fingerprint != fingerprint {
+		g.metrics().IncRequestIDConflict()
+		shared.WriteError(w, http.StatusConflict, "request_id_conflict", fmt.Errorf("request_id %q was already used for a different execution request", req.RequestID))
+		return existing, false, true
+	}
+
+	switch existing.Status {
+	case JobSucceeded:
+		if existing.Response == nil {
+			shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", fmt.Errorf("job %q succeeded without a stored response", req.RequestID))
+			return existing, false, false
+		}
+		g.metrics().IncRequestCacheHit()
+		shared.WriteJSON(w, http.StatusOK, *existing.Response)
+		return existing, false, true
+	case JobQueued, JobDispatching, JobRunning:
+		g.metrics().IncRequestInProgressConflict()
+		shared.WriteError(w, http.StatusConflict, "request_in_progress", fmt.Errorf("request_id %q is already running", req.RequestID))
+		return existing, false, true
+	case JobFailed:
+		if existing.MaxAttempts > 0 && existing.Attempt >= existing.MaxAttempts {
+			g.metrics().IncDispatchFailure()
+			shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", fmt.Errorf("request_id %q reached max attempts", req.RequestID))
+			return existing, false, true
+		}
+		return existing, true, true
+	case JobAmbiguous:
+		g.metrics().IncRequestInProgressConflict()
+		shared.WriteError(w, http.StatusConflict, "request_in_progress", fmt.Errorf("request_id %q is ambiguous and requires recovery", req.RequestID))
+		return existing, false, true
+	default:
+		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", fmt.Errorf("job %q has unknown status %q", req.RequestID, existing.Status))
+		return existing, false, false
+	}
 }
 
 func (g *Gateway) metrics() *shared.Metrics {
@@ -380,6 +483,22 @@ func (g *Gateway) requestCacheMaxEntries() int {
 	}
 
 	return DefaultExecutionRequestCacheMaxEntries
+}
+
+func (g *Gateway) jobMaxAttempts() int {
+	if g.JobMaxAttempts > 0 {
+		return g.JobMaxAttempts
+	}
+
+	return DefaultJobMaxAttempts
+}
+
+func (g *Gateway) jobLeaseTTL() time.Duration {
+	if g.JobLeaseTTL > 0 {
+		return g.JobLeaseTTL
+	}
+
+	return DefaultJobLeaseTTL
 }
 
 func limitRequestBody(w http.ResponseWriter, r *http.Request, maxBytes int64) {

@@ -142,9 +142,14 @@ EXECUTE_CLIENT_ALLOWLIST=
 MAX_EXECUTION_REQUEST_BYTES=2097152
 EXECUTION_REQUEST_CACHE_TTL=5m
 EXECUTION_REQUEST_CACHE_MAX_ENTRIES=4096
+JOB_STORE_PATH=/etc/wasmcat/wasmcat-jobs.db
+JOB_MAX_ATTEMPTS=3
+JOB_LEASE_TTL=30s
 MODULE_HOST_ALLOWLIST=
 REQUIRE_MODULE_DIGEST=false
 ```
+
+`JOB_STORE_PATH` is the local SQLite database for durable execution job state. Keep it on persistent disk, not a temporary filesystem, if you want completed `request_id` results and accepted job records to survive master restart.
 
 For production, set `EXECUTE_CLIENT_ALLOWLIST` to the client certificate common names or DNS SANs allowed to submit execution requests. Example:
 
@@ -249,6 +254,8 @@ MAX_CACHED_MODULES=128
 MAX_CACHE_BYTES=268435456
 MODULE_CACHE_TTL=30m
 ```
+
+`WORKER_ADVERTISE_ADDRESS` must be reachable from the master. The worker runtime and `wasmcat-worker init` default this value to `<hostname>:<worker-port>` when it is not set, which is safer than localhost for multi-host installs. Set it explicitly when the master should use a private IP, DNS name, or load-balancer address. Use `localhost:<port>` only for same-host development.
 
 Copy or mount these files into `/etc/wasmcat/certs`:
 
