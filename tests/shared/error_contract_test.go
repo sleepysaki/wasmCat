@@ -45,6 +45,7 @@ func TestPublicErrorMessageCoversRequestIdempotencyCodes(t *testing.T) {
 	tests := map[string]string{
 		"request_in_progress": "Execution request is already in progress.",
 		"request_id_conflict": "Request ID was already used for different request content.",
+		"job_not_found":       "Job was not found.",
 	}
 
 	for code, expected := range tests {

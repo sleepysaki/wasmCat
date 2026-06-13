@@ -59,6 +59,8 @@ func PublicErrorMessage(code string) string {
 		return "Execution request is already in progress."
 	case "request_id_conflict":
 		return "Request ID was already used for different request content."
+	case "job_not_found":
+		return "Job was not found."
 	case "module_policy_violation":
 		return "Module source policy rejected the request."
 	case "module_digest_invalid":

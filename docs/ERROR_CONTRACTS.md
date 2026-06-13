@@ -32,6 +32,7 @@ Handlers pass the real Go error to `shared.WriteError`. The function logs the ra
 | `invalid_execution_request` | `Invalid execution request.` |
 | `request_in_progress` | `Execution request is already in progress.` |
 | `request_id_conflict` | `Request ID was already used for different request content.` |
+| `job_not_found` | `Job was not found.` |
 | `module_policy_violation` | `Module source policy rejected the request.` |
 | `module_digest_invalid` | `Module digest is invalid.` |
 | `module_digest_mismatch` | `Module digest does not match downloaded content.` |

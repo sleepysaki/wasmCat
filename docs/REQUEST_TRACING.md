@@ -1,6 +1,6 @@
 # Request Tracing
 
-wasmCat assigns a `request_id` to every execution request so operators can follow one invocation through master ingress, scheduling, worker execution, and the final response. The same field also acts as a bounded in-memory idempotency key on the master.
+wasmCat assigns a `request_id` to every execution request so operators can follow one invocation through master ingress, scheduling, worker execution, durable job storage, and the final response. The same field also acts as the idempotency key on the master.
 
 ## Request ID Rules
 
@@ -29,7 +29,8 @@ Accepted client IDs are limited to 128 characters and may contain letters, digit
 2. The dispatcher forwards the same ID to the selected worker.
 3. The worker returns the same ID in `ExecutionResponse`.
 4. The master returns that ID to the client and logs it around scheduling and dispatch.
-5. After a successful response, the master keeps the response for `EXECUTION_REQUEST_CACHE_TTL`, bounded by `EXECUTION_REQUEST_CACHE_MAX_ENTRIES`, so a duplicate request with the same ID and same content can receive the cached response without dispatching again.
+5. In normal runtime, the master stores durable job state in SQLite, so a duplicate request with the same ID and same content can receive the stored response without dispatching again.
+6. Operators can inspect durable state with `GET /api/v1/jobs/{request_id}`.
 
 The worker also includes `execution_time_ms` in the response. This is measured around the worker-side invoke path: request validation, cache lookup or module fetch, WASM instantiation, execution, and response construction.
 
@@ -44,4 +45,4 @@ Use `request_id` when investigating:
 
 If a duplicate request arrives while the original is still running, the master returns `409 request_in_progress`. If the same ID is reused with different execution content, the master returns `409 request_id_conflict`.
 
-Idempotency history is process-local and in memory. A master restart clears it, and multiple masters do not share it.
+Idempotency history is durable for a single master when `JOB_STORE_PATH` points at persistent storage. Multiple active masters still require shared storage or a leader protocol before they can safely share request ownership.

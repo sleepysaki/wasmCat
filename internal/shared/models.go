@@ -143,6 +143,19 @@ type ExecutionResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+type JobResponse struct {
+	RequestID   string             `json:"request_id"`
+	Status      string             `json:"status"`
+	WorkerID    string             `json:"worker_id,omitempty"`
+	Attempt     int                `json:"attempt"`
+	MaxAttempts int                `json:"max_attempts"`
+	LeaseUntil  string             `json:"lease_until,omitempty"`
+	LastError   string             `json:"last_error,omitempty"`
+	Response    *ExecutionResponse `json:"response,omitempty"`
+	CreatedAt   string             `json:"created_at"`
+	UpdatedAt   string             `json:"updated_at"`
+}
+
 // UTILITY MODELS
 
 // APIResponse is a standard wrapper for basic success/failure messages

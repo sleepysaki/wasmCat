@@ -36,6 +36,14 @@ The recovery loop now scans durable jobs on startup and every `JOB_RECOVERY_INTE
 4. If recovered dispatch reaches `JOB_MAX_ATTEMPTS`, the job becomes `failed`.
 5. Expired `dispatching` or `running` jobs become `ambiguous`, because the master cannot prove whether the previous worker execution happened.
 
+The master also exposes durable job inspection:
+
+```text
+GET /api/v1/jobs/{request_id}
+```
+
+This returns the durable job status, attempt counts, worker ID, timestamps, last error, and stored execution response when the job succeeded. The endpoint uses the same optional execution-client certificate allowlist as `/api/v1/execute`.
+
 ## Current Job States
 
 | State | Meaning |
@@ -49,7 +57,6 @@ The recovery loop now scans durable jobs on startup and every `JOB_RECOVERY_INTE
 
 ## Next Phases
 
-1. Add `GET /api/v1/jobs/{request_id}` for durable job inspection.
-2. Add `POST /api/v1/jobs` for async submission.
-3. Add worker completion callbacks so results can survive master crashes during active execution.
-4. Add job-state metrics for queued, dispatching, succeeded, failed, and ambiguous counts.
+1. Add `POST /api/v1/jobs` for async submission.
+2. Add worker completion callbacks so results can survive master crashes during active execution.
+3. Add job-state metrics for queued, dispatching, succeeded, failed, and ambiguous counts.

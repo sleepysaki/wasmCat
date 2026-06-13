@@ -65,6 +65,7 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("/internal/heartbeat", g.handleHeartbeat)
 	mux.HandleFunc("/internal/drain", g.handleDrain)
 	mux.HandleFunc("/api/v1/execute", g.handleExecute)
+	mux.HandleFunc("/api/v1/jobs/", g.handleGetJob)
 	return logging.MiddlewareWithMetrics("master", mux, g.metrics())
 }
 
@@ -344,6 +345,43 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	shared.WriteJSON(w, http.StatusOK, result)
 }
 
+func (g *Gateway) handleGetJob(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if err := g.validateExecuteClientIdentity(r); err != nil {
+		shared.WriteError(w, http.StatusForbidden, "execute_client_unauthorized", err)
+		return
+	}
+	if g.JobStore == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "not_ready", fmt.Errorf("job store is not configured"))
+		return
+	}
+
+	requestID := strings.TrimPrefix(r.URL.Path, "/api/v1/jobs/")
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" || strings.Contains(requestID, "/") {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", fmt.Errorf("job request_id is required"))
+		return
+	}
+	if err := shared.ValidateRequestID(requestID); err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+		return
+	}
+
+	job, err := g.JobStore.Get(r.Context(), requestID)
+	if err != nil {
+		if errors.Is(err, ErrJobNotFound) {
+			shared.WriteError(w, http.StatusNotFound, "job_not_found", err)
+			return
+		}
+		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", err)
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, jobResponse(job))
+}
+
 func (g *Gateway) handleDurableExecute(w http.ResponseWriter, r *http.Request, req shared.ExecutionRequest) {
 	ctx := r.Context()
 
@@ -437,6 +475,33 @@ func (g *Gateway) beginDurableJob(ctx context.Context, w http.ResponseWriter, re
 		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", fmt.Errorf("job %q has unknown status %q", req.RequestID, existing.Status))
 		return existing, false, false
 	}
+}
+
+func jobResponse(job JobRecord) shared.JobResponse {
+	response := shared.JobResponse{
+		RequestID:   job.RequestID,
+		Status:      string(job.Status),
+		WorkerID:    job.WorkerID,
+		Attempt:     job.Attempt,
+		MaxAttempts: job.MaxAttempts,
+		LastError:   job.LastError,
+		Response:    job.Response,
+		CreatedAt:   formatJobTime(job.CreatedAt),
+		UpdatedAt:   formatJobTime(job.UpdatedAt),
+	}
+	if !job.LeaseUntil.IsZero() {
+		response.LeaseUntil = formatJobTime(job.LeaseUntil)
+	}
+
+	return response
+}
+
+func formatJobTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func (g *Gateway) metrics() *shared.Metrics {

@@ -65,6 +65,14 @@ The core responsibility is to execute WASM modules on registered workers without
 10. `WasmEngine.ExecuteWithDigest` enforces payload and concurrency limits, fetches/compiles the module if needed, verifies `module_digest` when supplied, instantiates a fresh module instance, writes payload bytes into WASM memory, calls exported `run(ptr, len)`, reads output bytes, and returns a string.
 11. Worker returns `shared.ExecutionResponse` with `request_id` and `execution_time_ms`; master fills `ExecutedOnNodeID` if needed, stores successful responses in the durable job store or request tracker, and returns the response to the client.
 
+#### Durable job query lifecycle
+
+1. Client sends `GET /api/v1/jobs/{request_id}` on the master.
+2. `Gateway.handleGetJob` validates the method, optional execution-client certificate identity, and `request_id` path segment.
+3. The gateway reads the durable `JobStore`.
+4. If found, it returns `shared.JobResponse` with status, worker ID, attempt counts, timestamps, last error, and stored execution response when available.
+5. Missing jobs return `404 job_not_found`.
+
 ## 2. Component & Module Breakdown
 
 ### `cmd/master/main.go`
@@ -106,7 +114,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/shared/models.go`
 
 - **Name & Responsibility:** Defines JSON models shared by master and worker.
-- **State & Properties:** `WorkerNode`, `Heartbeat`, `DrainRequest`, worker state constants, `ExecutionRequest`, `ExecutionResponse`, request ID helpers, `APIResponse`, `ErrorResponse`, `HealthResponse`, and metrics response models.
+- **State & Properties:** `WorkerNode`, `Heartbeat`, `DrainRequest`, worker state constants, `ExecutionRequest`, `ExecutionResponse`, `JobResponse`, request ID helpers, `APIResponse`, `ErrorResponse`, `HealthResponse`, and metrics response models.
 - **Interactions:** All HTTP request/response handlers use these models.
 
 ### `internal/shared/http.go`
@@ -627,7 +635,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func (g *Gateway) Handler() http.Handler`
 
 - **Return Values:** HTTP handler with master routes wrapped by logging middleware.
-- **Routes:** `/wasmcat/health`, `/wasmcat/ready`, `/wasmcat/metrics`, `/internal/register`, `/internal/heartbeat`, `/internal/drain`, `/api/v1/execute`.
+- **Routes:** `/wasmcat/health`, `/wasmcat/ready`, `/wasmcat/metrics`, `/internal/register`, `/internal/heartbeat`, `/internal/drain`, `/api/v1/execute`, `/api/v1/jobs/{request_id}`.
 - **Side Effects:** None until the returned handler is used.
 
 ##### `func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request)`
@@ -669,6 +677,13 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Return Values:** 200 `ExecutionResponse` on success.
 - **Error Handling:** 405 wrong method, 403 unauthorized execution client, 403 module policy violation, 400 invalid JSON or validation failure, 503 dispatch failure.
 - **Side Effects:** Validates execution client certificate identity when configured, validates or creates `request_id`, triggers scheduling, ACR network calls, and worker network call.
+
+##### `func (g *Gateway) handleGetJob(w http.ResponseWriter, r *http.Request)`
+
+- **Parameters:** HTTP response writer and request. The request path must be `/api/v1/jobs/{request_id}`.
+- **Return Values:** 200 `JobResponse` when the durable job exists.
+- **Error Handling:** 405 wrong method, 403 unauthorized execution client, 503 if no job store is configured, 400 invalid or missing request ID, 404 `job_not_found`, 503 store read failure.
+- **Side Effects:** Reads durable job state from `JobStore`; does not dispatch work or mutate job state.
 
 ##### `func (g *Gateway) validateExecuteClientIdentity(r *http.Request) error`
 
@@ -1216,6 +1231,7 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | Master | `POST` | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
 | Master | `POST` | `/internal/drain` | `DrainRequest` | `APIResponse` | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
 | Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 413 body too large, 403 unauthorized execution client, 403 module policy violation, 409 duplicate/conflicting request ID, 400 invalid JSON/request, 503 dispatch failure. |
+| Master | `GET` | `/api/v1/jobs/{request_id}` | none | `JobResponse` | 405 wrong method, 403 unauthorized execution client, 400 invalid request ID, 404 unknown job, 503 job store unavailable/read failure. |
 | Worker | `GET` | `/wasmcat/health` | none | `HealthResponse` | 405 wrong method, JSON encode failure only. |
 | Worker | `GET` | `/wasmcat/ready` | none | `HealthResponse` | 405 wrong method, 503 if engine is nil. |
 | Worker | `GET` | `/wasmcat/metrics` | none | `MetricsResponse` | 405 wrong method, JSON encode failure only. Includes execution, digest-failure, and module-cache counters. |
