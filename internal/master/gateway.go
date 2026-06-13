@@ -65,6 +65,7 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("/internal/heartbeat", g.handleHeartbeat)
 	mux.HandleFunc("/internal/drain", g.handleDrain)
 	mux.HandleFunc("/api/v1/execute", g.handleExecute)
+	mux.HandleFunc("/api/v1/jobs", g.handleCreateJob)
 	mux.HandleFunc("/api/v1/jobs/", g.handleGetJob)
 	return logging.MiddlewareWithMetrics("master", mux, g.metrics())
 }
@@ -279,31 +280,10 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusForbidden, "execute_client_unauthorized", err)
 		return
 	}
-	limitRequestBody(w, r, g.maxExecuteBodyBytes())
-
-	var req shared.ExecutionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if isBodyTooLargeError(err) {
-			shared.WriteError(w, http.StatusRequestEntityTooLarge, "request_body_too_large", err)
-			return
-		}
-		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+	req, ok := g.decodeExecutionRequest(w, r)
+	if !ok {
 		return
 	}
-	if err := req.Validate(); err != nil {
-		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
-		return
-	}
-	if err := g.ModulePolicy.Validate(req); err != nil {
-		shared.WriteError(w, http.StatusForbidden, "module_policy_violation", err)
-		return
-	}
-	requestID, err := shared.EnsureRequestID(req.RequestID)
-	if err != nil {
-		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
-		return
-	}
-	req.RequestID = requestID
 
 	if g.JobStore != nil {
 		g.handleDurableExecute(w, r, req)
@@ -345,6 +325,34 @@ func (g *Gateway) handleExecute(w http.ResponseWriter, r *http.Request) {
 	shared.WriteJSON(w, http.StatusOK, result)
 }
 
+func (g *Gateway) handleCreateJob(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if err := g.validateExecuteClientIdentity(r); err != nil {
+		shared.WriteError(w, http.StatusForbidden, "execute_client_unauthorized", err)
+		return
+	}
+	if g.JobStore == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "not_ready", fmt.Errorf("job store is not configured"))
+		return
+	}
+
+	// Async jobs use the same request shape as direct execution so clients do not
+	// need to learn two payload formats. The difference is only lifecycle: this
+	// path accepts and stores the job, then lets the recovery loop own dispatch.
+	req, ok := g.decodeExecutionRequest(w, r)
+	if !ok {
+		return
+	}
+
+	job, status, ok := g.createQueuedJob(r.Context(), w, req)
+	if !ok {
+		return
+	}
+	shared.WriteJSON(w, status, jobResponse(job))
+}
+
 func (g *Gateway) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	if !shared.RequireMethod(w, r, http.MethodGet) {
 		return
@@ -380,6 +388,39 @@ func (g *Gateway) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shared.WriteJSON(w, http.StatusOK, jobResponse(job))
+}
+
+func (g *Gateway) decodeExecutionRequest(w http.ResponseWriter, r *http.Request) (shared.ExecutionRequest, bool) {
+	limitRequestBody(w, r, g.maxExecuteBodyBytes())
+
+	var req shared.ExecutionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isBodyTooLargeError(err) {
+			shared.WriteError(w, http.StatusRequestEntityTooLarge, "request_body_too_large", err)
+			return shared.ExecutionRequest{}, false
+		}
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+		return shared.ExecutionRequest{}, false
+	}
+	if err := req.Validate(); err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+		return shared.ExecutionRequest{}, false
+	}
+	if err := g.ModulePolicy.Validate(req); err != nil {
+		shared.WriteError(w, http.StatusForbidden, "module_policy_violation", err)
+		return shared.ExecutionRequest{}, false
+	}
+
+	// Empty request IDs are valid client input. The master turns them into a
+	// durable id before fingerprinting so retries can query and reuse the same job.
+	requestID, err := shared.EnsureRequestID(req.RequestID)
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+		return shared.ExecutionRequest{}, false
+	}
+	req.RequestID = requestID
+
+	return req, true
 }
 
 func (g *Gateway) handleDurableExecute(w http.ResponseWriter, r *http.Request, req shared.ExecutionRequest) {
@@ -418,6 +459,39 @@ func (g *Gateway) handleDurableExecute(w http.ResponseWriter, r *http.Request, r
 	g.metrics().IncDispatchSuccess()
 
 	shared.WriteJSON(w, http.StatusOK, result)
+}
+
+func (g *Gateway) createQueuedJob(ctx context.Context, w http.ResponseWriter, req shared.ExecutionRequest) (JobRecord, int, bool) {
+	fingerprint, err := ExecutionJobFingerprint(req)
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_execution_request", err)
+		return JobRecord{}, 0, false
+	}
+
+	now := time.Now()
+	job := NewJobRecord(req, fingerprint, g.jobMaxAttempts(), now)
+	if err := g.JobStore.Create(ctx, job); err == nil {
+		return job, http.StatusAccepted, true
+	} else if !errors.Is(err, ErrJobExists) {
+		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", err)
+		return JobRecord{}, 0, false
+	}
+
+	// A repeated async submission is a read of the existing durable contract, not
+	// a second enqueue. The fingerprint check protects the request ID from being
+	// reused for a different module, payload, digest, or location.
+	existing, err := g.JobStore.Get(ctx, req.RequestID)
+	if err != nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", err)
+		return JobRecord{}, 0, false
+	}
+	if existing.Fingerprint != fingerprint {
+		g.metrics().IncRequestIDConflict()
+		shared.WriteError(w, http.StatusConflict, "request_id_conflict", fmt.Errorf("request_id %q was already used for a different execution request", req.RequestID))
+		return JobRecord{}, 0, false
+	}
+
+	return existing, http.StatusOK, true
 }
 
 func (g *Gateway) beginDurableJob(ctx context.Context, w http.ResponseWriter, req shared.ExecutionRequest) (JobRecord, bool, bool) {

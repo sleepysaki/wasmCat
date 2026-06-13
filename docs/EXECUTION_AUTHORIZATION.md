@@ -1,6 +1,6 @@
 # Execution Client Authorization
 
-The master always requires mTLS at the HTTPS server layer. `EXECUTE_CLIENT_ALLOWLIST` adds a second authorization check for `POST /api/v1/execute`.
+The master always requires mTLS at the HTTPS server layer. `EXECUTE_CLIENT_ALLOWLIST` adds a second authorization check for client-facing execution APIs: `POST /api/v1/execute`, `POST /api/v1/jobs`, and `GET /api/v1/jobs/{request_id}`.
 
 ## Configuration
 
@@ -12,7 +12,7 @@ EXECUTE_CLIENT_ALLOWLIST=wasmcat-client,deployer.internal
 
 Each value is matched against the caller certificate common name or DNS SAN. Whitespace around commas is ignored.
 
-If the variable is empty, any client certificate trusted by the master CA can call `/api/v1/execute`. That preserves local development behavior but is not recommended for production.
+If the variable is empty, any client certificate trusted by the master CA can call the execution and job APIs. That preserves local development behavior but is not recommended for production.
 
 ## Certificate Identity Examples
 

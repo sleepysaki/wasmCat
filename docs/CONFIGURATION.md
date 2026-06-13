@@ -23,8 +23,8 @@ Byte and count limits must be greater than zero. CPU scheduling thresholds must 
 | `MASTER_SHUTDOWN_TIMEOUT` | `5s` | Max graceful shutdown time for in-flight master HTTP requests. |
 | `MIN_WORKER_CPU_FREE` | `0` | Minimum free CPU percentage required for a worker to receive new work. |
 | `MIN_WORKER_RAM_FREE_MB` | `0` | Minimum free RAM in MiB required for a worker to receive new work. |
-| `EXECUTE_CLIENT_ALLOWLIST` | empty | Comma-separated client certificate CN or DNS SAN values allowed to call `/api/v1/execute`. Empty means any trusted mTLS client can execute work. |
-| `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | Maximum JSON body size accepted by the master `/api/v1/execute` endpoint. |
+| `EXECUTE_CLIENT_ALLOWLIST` | empty | Comma-separated client certificate CN or DNS SAN values allowed to call `/api/v1/execute`, `/api/v1/jobs`, and `/api/v1/jobs/{request_id}`. Empty means any trusted mTLS client can submit or inspect work. |
+| `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | Maximum JSON body size accepted by the master `/api/v1/execute` and `/api/v1/jobs` endpoints. |
 | `EXECUTION_REQUEST_CACHE_TTL` | `5m` | How long successful `/api/v1/execute` responses are cached by `request_id` for duplicate client retries. |
 | `EXECUTION_REQUEST_CACHE_MAX_ENTRIES` | `4096` | Maximum in-memory request records kept by the master idempotency tracker. Completed records are evicted before in-flight records. |
 | `JOB_STORE_PATH` | `./wasmcat-jobs.db` | SQLite file used for durable execution job state and persisted successful responses. |

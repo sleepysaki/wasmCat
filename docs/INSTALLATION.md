@@ -154,7 +154,7 @@ REQUIRE_MODULE_DIGEST=false
 `JOB_STORE_PATH` is the local SQLite database for durable execution job state. Keep it on persistent disk, not a temporary filesystem, if you want completed `request_id` results and accepted job records to survive master restart.
 The recovery loop scans this database for queued jobs and expired active leases. Queued jobs are retried; expired active leases are marked `ambiguous` because a worker may already have executed them.
 
-For production, set `EXECUTE_CLIENT_ALLOWLIST` to the client certificate common names or DNS SANs allowed to submit execution requests. Example:
+For production, set `EXECUTE_CLIENT_ALLOWLIST` to the client certificate common names or DNS SANs allowed to submit execution requests, enqueue async jobs, and inspect durable job state. Example:
 
 ```text
 EXECUTE_CLIENT_ALLOWLIST=wasmcat-client,deployer.internal

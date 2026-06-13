@@ -65,13 +65,18 @@ The core responsibility is to execute WASM modules on registered workers without
 10. `WasmEngine.ExecuteWithDigest` enforces payload and concurrency limits, fetches/compiles the module if needed, verifies `module_digest` when supplied, instantiates a fresh module instance, writes payload bytes into WASM memory, calls exported `run(ptr, len)`, reads output bytes, and returns a string.
 11. Worker returns `shared.ExecutionResponse` with `request_id` and `execution_time_ms`; master fills `ExecutedOnNodeID` if needed, stores successful responses in the durable job store or request tracker, and returns the response to the client.
 
-#### Durable job query lifecycle
+#### Durable async job lifecycle
 
-1. Client sends `GET /api/v1/jobs/{request_id}` on the master.
-2. `Gateway.handleGetJob` validates the method, optional execution-client certificate identity, and `request_id` path segment.
-3. The gateway reads the durable `JobStore`.
-4. If found, it returns `shared.JobResponse` with status, worker ID, attempt counts, timestamps, last error, and stored execution response when available.
-5. Missing jobs return `404 job_not_found`.
+1. Client sends `POST /api/v1/jobs` with a normal `ExecutionRequest` when it wants durable async acceptance instead of waiting for worker execution.
+2. `Gateway.handleCreateJob` validates the method, optional execution-client certificate identity, body size, request fields, module source policy, and request ID.
+3. The gateway creates a `queued` durable job in `JobStore` and returns `202 Accepted` with `shared.JobResponse`.
+4. If the same `request_id` and same fingerprint already exist, the gateway returns the existing job with `200 OK`. If the same `request_id` was used for different execution content, it returns `409 request_id_conflict`.
+5. The recovery loop later dispatches queued jobs and records success, failure, retry, or ambiguity through the same durable state machine.
+6. Client sends `GET /api/v1/jobs/{request_id}` to inspect progress.
+7. `Gateway.handleGetJob` validates the method, optional execution-client certificate identity, and `request_id` path segment.
+8. The gateway reads the durable `JobStore`.
+9. If found, it returns `shared.JobResponse` with status, worker ID, attempt counts, timestamps, last error, and stored execution response when available.
+10. Missing jobs return `404 job_not_found`.
 
 ## 2. Component & Module Breakdown
 
@@ -157,7 +162,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Name & Responsibility:** Defines durable execution job records and state names.
 - **State & Properties:** `JobRecord` stores request ID, execution fingerprint, original request, status, worker ID, attempt count, max attempts, lease time, last error, optional response, and timestamps.
-- **Interactions:** `Gateway.handleExecute` creates records before dispatch; `JobStore` implementations persist and transition records.
+- **Interactions:** `Gateway.handleExecute` creates records before synchronous dispatch; `Gateway.handleCreateJob` creates queued records for async dispatch; `JobStore` implementations persist and transition records.
 
 ### `internal/master/job_store.go`
 
@@ -635,7 +640,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func (g *Gateway) Handler() http.Handler`
 
 - **Return Values:** HTTP handler with master routes wrapped by logging middleware.
-- **Routes:** `/wasmcat/health`, `/wasmcat/ready`, `/wasmcat/metrics`, `/internal/register`, `/internal/heartbeat`, `/internal/drain`, `/api/v1/execute`, `/api/v1/jobs/{request_id}`.
+- **Routes:** `/wasmcat/health`, `/wasmcat/ready`, `/wasmcat/metrics`, `/internal/register`, `/internal/heartbeat`, `/internal/drain`, `/api/v1/execute`, `/api/v1/jobs`, `/api/v1/jobs/{request_id}`.
 - **Side Effects:** None until the returned handler is used.
 
 ##### `func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request)`
@@ -678,12 +683,33 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Error Handling:** 405 wrong method, 403 unauthorized execution client, 403 module policy violation, 400 invalid JSON or validation failure, 503 dispatch failure.
 - **Side Effects:** Validates execution client certificate identity when configured, validates or creates `request_id`, triggers scheduling, ACR network calls, and worker network call.
 
+##### `func (g *Gateway) handleCreateJob(w http.ResponseWriter, r *http.Request)`
+
+- **Parameters:** JSON `shared.ExecutionRequest`.
+- **Return Values:** 202 `JobResponse` for a newly queued durable job. 200 `JobResponse` when the same request ID and same execution fingerprint already exist.
+- **Error Handling:** 405 wrong method, 403 unauthorized execution client, 503 missing job store, 413 body too large, 400 invalid JSON/request, 403 module policy violation, 409 conflicting request ID, 503 store failure.
+- **Side Effects:** Writes a durable `queued` job into `JobStore` when the request is new. It does not dispatch work directly.
+
 ##### `func (g *Gateway) handleGetJob(w http.ResponseWriter, r *http.Request)`
 
 - **Parameters:** HTTP response writer and request. The request path must be `/api/v1/jobs/{request_id}`.
 - **Return Values:** 200 `JobResponse` when the durable job exists.
 - **Error Handling:** 405 wrong method, 403 unauthorized execution client, 503 if no job store is configured, 400 invalid or missing request ID, 404 `job_not_found`, 503 store read failure.
 - **Side Effects:** Reads durable job state from `JobStore`; does not dispatch work or mutate job state.
+
+##### `func (g *Gateway) decodeExecutionRequest(w http.ResponseWriter, r *http.Request) (shared.ExecutionRequest, bool)`
+
+- **Parameters:** HTTP response writer and request containing JSON `ExecutionRequest`.
+- **Return Values:** Validated request with a populated `request_id`, plus `true`; zero request plus `false` after writing an HTTP error.
+- **Error Handling:** Body too large, invalid JSON, request validation failure, module policy violation, or invalid generated/provided request ID.
+- **Side Effects:** Wraps the request body with `http.MaxBytesReader`; writes JSON errors on validation failure.
+
+##### `func (g *Gateway) createQueuedJob(ctx context.Context, w http.ResponseWriter, req shared.ExecutionRequest) (JobRecord, int, bool)`
+
+- **Parameters:** Request context, HTTP response writer for error responses, and validated execution request.
+- **Return Values:** Durable job record, HTTP status to use for the response, and success flag. New jobs return `202`; existing matching jobs return `200`.
+- **Error Handling:** Invalid execution fingerprint, store create/read failure, or `request_id` fingerprint conflict.
+- **Side Effects:** Inserts a durable queued job in `JobStore` for new request IDs; increments request ID conflict metrics on conflicting reuse.
 
 ##### `func (g *Gateway) validateExecuteClientIdentity(r *http.Request) error`
 
@@ -1151,8 +1177,8 @@ The core responsibility is to execute WASM modules on registered workers without
 | `MASTER_SHUTDOWN_TIMEOUT` | `5s` | Go duration | Graceful shutdown window for in-flight master HTTP requests. |
 | `MIN_WORKER_CPU_FREE` | `0` | float percentage | Minimum reported free CPU required before the scheduler can select a worker. |
 | `MIN_WORKER_RAM_FREE_MB` | `0` | float MiB | Minimum reported free RAM required before the scheduler can select a worker. |
-| `EXECUTE_CLIENT_ALLOWLIST` | empty | comma-separated certificate identities | Optional client certificate CN or DNS SAN allowlist for `/api/v1/execute`. Empty allows any trusted mTLS client. |
-| `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | integer bytes | Maximum JSON body size accepted by master `/api/v1/execute`. |
+| `EXECUTE_CLIENT_ALLOWLIST` | empty | comma-separated certificate identities | Optional client certificate CN or DNS SAN allowlist for `/api/v1/execute`, `/api/v1/jobs`, and `/api/v1/jobs/{request_id}`. Empty allows any trusted mTLS client. |
+| `MAX_EXECUTION_REQUEST_BYTES` | `2097152` | integer bytes | Maximum JSON body size accepted by master `/api/v1/execute` and `/api/v1/jobs`. |
 | `EXECUTION_REQUEST_CACHE_TTL` | `5m` | Go duration | How long successful execution responses remain cached by `request_id`. |
 | `EXECUTION_REQUEST_CACHE_MAX_ENTRIES` | `4096` | integer count | Maximum in-memory request records kept by the master idempotency tracker. |
 | `JOB_STORE_PATH` | `./wasmcat-jobs.db` | filesystem path | SQLite database file for durable execution job state. |
@@ -1231,6 +1257,7 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | Master | `POST` | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
 | Master | `POST` | `/internal/drain` | `DrainRequest` | `APIResponse` | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
 | Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 413 body too large, 403 unauthorized execution client, 403 module policy violation, 409 duplicate/conflicting request ID, 400 invalid JSON/request, 503 dispatch failure. |
+| Master | `POST` | `/api/v1/jobs` | `ExecutionRequest` | `JobResponse` | 405 wrong method, 503 missing job store, 413 body too large, 403 unauthorized execution client, 403 module policy violation, 409 conflicting request ID, 400 invalid JSON/request, 503 store failure. |
 | Master | `GET` | `/api/v1/jobs/{request_id}` | none | `JobResponse` | 405 wrong method, 403 unauthorized execution client, 400 invalid request ID, 404 unknown job, 503 job store unavailable/read failure. |
 | Worker | `GET` | `/wasmcat/health` | none | `HealthResponse` | 405 wrong method, JSON encode failure only. |
 | Worker | `GET` | `/wasmcat/ready` | none | `HealthResponse` | 405 wrong method, 503 if engine is nil. |
@@ -1296,18 +1323,18 @@ output_len = uint32(result)
 - **HTTP clients are bounded:** Shared client defaults set total request, dial, TLS handshake, response-header, idle connection, and pool limits. Request contexts still provide operation-specific cancellation.
 - **HTTP servers are bounded:** Master and worker servers set read-header, read, write, and idle timeouts through the shared server factory.
 - **HTTP retries are bounded:** Safe outbound paths retry transient statuses and transport errors up to 3 attempts. Worker `/invoke` does not retry the same worker, but dispatch can reschedule to another candidate on transport failure or `502`/`503`/`504`.
-- **Master request bodies are bounded:** Internal worker control messages are capped at 4 KiB. `/api/v1/execute` uses `MAX_EXECUTION_REQUEST_BYTES`.
+- **Master request bodies are bounded:** Internal worker control messages are capped at 4 KiB. `/api/v1/execute` and `/api/v1/jobs` use `MAX_EXECUTION_REQUEST_BYTES`.
 - **Master shutdown is bounded:** Master HTTP shutdown uses `MASTER_SHUTDOWN_TIMEOUT`, so stop/restart does not wait forever on in-flight requests.
 - **Worker shutdown is bounded:** Worker HTTP shutdown uses `WORKER_SHUTDOWN_TIMEOUT`; requests still remain constrained by `EXECUTION_TIMEOUT`.
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
 - **Cold fetch coalescing is process-local:** Concurrent cold requests for the same cache key share one download/compile inside a worker process. Separate workers still compile independently.
-- **Durable job reliability is partial:** normal master startup persists accepted jobs and successful responses in SQLite, so duplicate completed `request_id` calls can survive restart. Recovery loops, async job APIs, and worker completion callbacks are still future HA phases.
+- **Durable job reliability is partial:** normal master startup persists accepted jobs and successful responses in SQLite, so duplicate completed `request_id` calls can survive restart. Recovery loops and async job submission exist, but worker completion callbacks are still a future HA phase.
 - **Health/readiness require mTLS:** Because TLS client auth is configured at server level, probes must present valid client certificates unless TLS routing changes.
 - **Development cert generation overwrites at runtime:** `GenerateCAAndCerts` uses `os.Create`. Production should set `AUTO_GENERATE_CERTS=false`; bootstrap protects generated files unless `--force` is used.
 - **Telemetry is host-level, not cgroup-level:** gopsutil reports host CPU and memory. It does not currently account for per-service cgroup quotas.
 - **Some state remains process-local:** Registry and module cache are in memory. Master restart loses worker registry; worker restart loses compiled module cache. Multiple master instances still need a shared backend or leader protocol before active-active HA is safe.
-- **Execution authorization allowlist is optional:** If `EXECUTE_CLIENT_ALLOWLIST` is empty, any valid client certificate trusted by the CA can call `/api/v1/execute`.
+- **Execution authorization allowlist is optional:** If `EXECUTE_CLIENT_ALLOWLIST` is empty, any valid client certificate trusted by the CA can call `/api/v1/execute`, `/api/v1/jobs`, and `/api/v1/jobs/{request_id}`.
 - **Module source policy is optional:** If `MODULE_HOST_ALLOWLIST` is empty and `REQUIRE_MODULE_DIGEST=false`, trusted execution clients can submit any HTTP(S) module URL.
 - **WASM ABI is narrow:** Modules must match the exact `memory`, `malloc`, and packed `run` ABI. WASI modules or modules with different host imports are not supported by the current engine path.
 

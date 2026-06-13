@@ -30,7 +30,8 @@ Accepted client IDs are limited to 128 characters and may contain letters, digit
 3. The worker returns the same ID in `ExecutionResponse`.
 4. The master returns that ID to the client and logs it around scheduling and dispatch.
 5. In normal runtime, the master stores durable job state in SQLite, so a duplicate request with the same ID and same content can receive the stored response without dispatching again.
-6. Operators can inspect durable state with `GET /api/v1/jobs/{request_id}`.
+6. Async clients can submit work with `POST /api/v1/jobs`; the returned `request_id` is the handle for later inspection.
+7. Operators can inspect durable state with `GET /api/v1/jobs/{request_id}`.
 
 The worker also includes `execution_time_ms` in the response. This is measured around the worker-side invoke path: request validation, cache lookup or module fetch, WASM instantiation, execution, and response construction.
 

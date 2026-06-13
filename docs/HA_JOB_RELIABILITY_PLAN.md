@@ -39,10 +39,13 @@ The recovery loop now scans durable jobs on startup and every `JOB_RECOVERY_INTE
 The master also exposes durable job inspection:
 
 ```text
+POST /api/v1/jobs
 GET /api/v1/jobs/{request_id}
 ```
 
-This returns the durable job status, attempt counts, worker ID, timestamps, last error, and stored execution response when the job succeeded. The endpoint uses the same optional execution-client certificate allowlist as `/api/v1/execute`.
+`POST /api/v1/jobs` accepts the same `ExecutionRequest` body as `/api/v1/execute`, persists a durable `queued` job, and returns `202 Accepted` with `JobResponse`. It does not dispatch inline; the recovery loop picks up queued jobs and applies the normal retry/lease rules. A duplicate async submission with the same `request_id` and same fingerprint returns the existing job with `200 OK`. A duplicate with different request content returns `409 request_id_conflict`.
+
+`GET /api/v1/jobs/{request_id}` returns the durable job status, attempt counts, worker ID, timestamps, last error, and stored execution response when the job succeeded. Both job endpoints use the same optional execution-client certificate allowlist as `/api/v1/execute`.
 
 ## Current Job States
 
@@ -57,6 +60,6 @@ This returns the durable job status, attempt counts, worker ID, timestamps, last
 
 ## Next Phases
 
-1. Add `POST /api/v1/jobs` for async submission.
-2. Add worker completion callbacks so results can survive master crashes during active execution.
-3. Add job-state metrics for queued, dispatching, succeeded, failed, and ambiguous counts.
+1. Add worker completion callbacks so results can survive master crashes during active execution.
+2. Add job-state metrics for queued, dispatching, succeeded, failed, and ambiguous counts.
+3. Add shared storage or leader election before running multiple active masters against the same job stream.
