@@ -38,6 +38,47 @@ type DrainRequest struct {
 	NodeID string `json:"node_id"`
 }
 
+type JobCompletionStatus string
+
+const (
+	JobCompletionSucceeded JobCompletionStatus = "succeeded"
+	JobCompletionFailed    JobCompletionStatus = "failed"
+)
+
+type JobCompletionRequest struct {
+	RequestID string              `json:"request_id"`
+	WorkerID  string              `json:"worker_id"`
+	Status    JobCompletionStatus `json:"status"`
+	Response  *ExecutionResponse  `json:"response,omitempty"`
+	Error     string              `json:"error,omitempty"`
+}
+
+func (r JobCompletionRequest) Validate() error {
+	if strings.TrimSpace(r.RequestID) == "" {
+		return fmt.Errorf("request_id is required")
+	}
+	if err := ValidateRequestID(r.RequestID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(r.WorkerID) == "" {
+		return fmt.Errorf("worker_id is required")
+	}
+	switch r.Status {
+	case JobCompletionSucceeded:
+		if r.Response == nil {
+			return fmt.Errorf("response is required for succeeded completion")
+		}
+	case JobCompletionFailed:
+		if strings.TrimSpace(r.Error) == "" {
+			return fmt.Errorf("error is required for failed completion")
+		}
+	default:
+		return fmt.Errorf("unsupported completion status %q", r.Status)
+	}
+
+	return nil
+}
+
 // EXECUTION MODELS (Data Plane)
 
 // ExecutionRequest: payload sent from the End-User to the Master, then forwarded from the Master to the chosen Worker

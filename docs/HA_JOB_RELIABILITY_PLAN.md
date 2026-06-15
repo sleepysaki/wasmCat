@@ -12,7 +12,7 @@ wasmCat's first HA priority is job reliability: once the master accepts an execu
 - Duplicate requests with the same `request_id` and different execution content return `409 request_id_conflict`.
 - Successful worker responses are stored and replayed from SQLite.
 - Dispatching and failed states are stored for later recovery work.
-- Execution remains at-least-once. Exactly-once side effects require module-level idempotency or a future worker completion protocol.
+- Execution remains at-least-once. Exactly-once side effects require module-level idempotency.
 
 ## Implemented Slices
 
@@ -27,6 +27,14 @@ Flow:
 5. On success, it stores the `ExecutionResponse` as `succeeded`.
 6. On dispatch failure, it stores `failed` with the last error.
 7. A duplicate successful request is returned from durable storage, even after reopening the database.
+
+Workers also report final execution state back to the master:
+
+```text
+POST /internal/jobs/complete
+```
+
+The worker sends `request_id`, `worker_id`, status, and either the final `ExecutionResponse` or an error string. The master validates the worker certificate identity before accepting the completion. This gives the job store a second persistence path when the original `/invoke` response path is interrupted.
 
 The recovery loop now scans durable jobs on startup and every `JOB_RECOVERY_INTERVAL`:
 
@@ -53,13 +61,13 @@ GET /api/v1/jobs/{request_id}
 | --- | --- |
 | `queued` | Job is persisted but not yet dispatched. |
 | `dispatching` | Master is trying to send the job to a worker. |
-| `running` | Reserved for the worker completion protocol. |
+| `running` | Reserved for longer-lived worker-owned execution tracking. |
 | `succeeded` | Result is stored and can be replayed. |
 | `failed` | Last synchronous dispatch attempt failed. |
 | `ambiguous` | Execution may have happened, but completion is unknown. These jobs are not automatically replayed. |
 
 ## Next Phases
 
-1. Add worker completion callbacks so results can survive master crashes during active execution.
-2. Add job-state metrics for queued, dispatching, succeeded, failed, and ambiguous counts.
+1. Add job-state metrics for queued, dispatching, succeeded, failed, and ambiguous counts.
+2. Add an operator workflow for resolving `ambiguous` jobs.
 3. Add shared storage or leader election before running multiple active masters against the same job stream.

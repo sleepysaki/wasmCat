@@ -42,7 +42,7 @@ The core responsibility is to execute WASM modules on registered workers without
 4. `signal.NotifyContext` creates a cancellable root context.
 5. `config.LoadWorker` reads worker identity, master URL, cert path, heartbeat interval, and execution limits. When `WORKER_ADVERTISE_ADDRESS` is unset, it defaults to `<hostname>:<worker-port>` and falls back to `localhost:<worker-port>` only if the OS hostname cannot be read.
 6. `worker.NewWasmEngineWithLimits` creates a wazero runtime, digest-aware compiled module cache, mutex, in-flight compile tracker, and execution semaphore.
-7. `WorkerServer` is constructed with the engine, node ID, and certificate directory.
+7. `WorkerServer` is constructed with the engine, node ID, certificate directory, and master URL for completion callbacks.
 8. `StartTelemetry` runs in a goroutine, registering the worker with configured latitude/longitude and sending periodic CPU/RAM heartbeats over mTLS.
 9. `WorkerServer.Start` loads CA/worker certificates, starts an HTTPS server requiring client certificates, and blocks until shutdown or server error.
 
@@ -61,9 +61,10 @@ The core responsibility is to execute WASM modules on registered workers without
 6. The dispatcher reads schedulable workers from `Registry.GetSchedulableWorkers`.
 7. `Scheduler.SelectWorker` filters out workers below configured free CPU/RAM thresholds, then chooses the nearest remaining worker by latitude/longitude.
 8. `Dispatcher.forwardToWorker` sends the request, including `request_id`, to `https://<worker>/invoke` over mTLS. If the selected worker has a transport error or returns `502`, `503`, or `504`, the dispatcher removes that worker from the candidate list and selects another worker. It does not reschedule worker execution errors such as `400 execution_failed`, `400 module_digest_invalid`, or `400 module_digest_mismatch`.
-9. `WorkerServer.handleInvoke` limits request body size, decodes and validates the request, then calls `WasmEngine.ExecuteWithDigest`.
+9. `WorkerServer.handleInvoke` limits request body size, decodes and validates the request, then calls `WasmEngine.ExecuteWithDigest` with a bounded execution context that is not cancelled by a broken master connection.
 10. `WasmEngine.ExecuteWithDigest` enforces payload and concurrency limits, fetches/compiles the module if needed, verifies `module_digest` when supplied, instantiates a fresh module instance, writes payload bytes into WASM memory, calls exported `run(ptr, len)`, reads output bytes, and returns a string.
-11. Worker returns `shared.ExecutionResponse` with `request_id` and `execution_time_ms`; master fills `ExecutedOnNodeID` if needed, stores successful responses in the durable job store or request tracker, and returns the response to the client.
+11. Worker reports final state to `POST /internal/jobs/complete` on the master with the same `request_id`, worker ID, and either the execution response or failure reason.
+12. Worker returns `shared.ExecutionResponse` with `request_id` and `execution_time_ms`; master fills `ExecutedOnNodeID` if needed, stores successful responses in the durable job store or request tracker, and returns the response to the client.
 
 #### Durable async job lifecycle
 
@@ -119,7 +120,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/shared/models.go`
 
 - **Name & Responsibility:** Defines JSON models shared by master and worker.
-- **State & Properties:** `WorkerNode`, `Heartbeat`, `DrainRequest`, worker state constants, `ExecutionRequest`, `ExecutionResponse`, `JobResponse`, request ID helpers, `APIResponse`, `ErrorResponse`, `HealthResponse`, and metrics response models.
+- **State & Properties:** `WorkerNode`, `Heartbeat`, `DrainRequest`, `JobCompletionRequest`, worker state constants, `ExecutionRequest`, `ExecutionResponse`, `JobResponse`, request ID helpers, `APIResponse`, `ErrorResponse`, `HealthResponse`, and metrics response models.
 - **Interactions:** All HTTP request/response handlers use these models.
 
 ### `internal/shared/http.go`
@@ -150,7 +151,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 - **Name & Responsibility:** Master HTTPS API server and request routing.
 - **State & Properties:** `Gateway.Registry`, `Gateway.Dispatcher`, `Gateway.CertDir`, `Gateway.Metrics`, optional `Gateway.Requests`, optional durable `Gateway.JobStore`, optional `Gateway.ExecuteClientIDs`, module source policy, request body limit, request cache settings, job retry/lease settings, and graceful shutdown timeout.
-- **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain, validates execution client certificate identity when configured, checks durable or in-memory request idempotency state, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
+- **Interactions:** Updates `Registry`, validates worker certificate identity during registration/heartbeat/drain/completion callbacks, validates execution client certificate identity when configured, checks durable or in-memory request idempotency state, calls `Dispatcher.Dispatch`, serves mTLS-protected endpoints.
 
 ### `internal/master/request_tracker.go`
 
@@ -215,8 +216,8 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/worker/server.go`
 
 - **Name & Responsibility:** Worker HTTPS API server and invocation handler.
-- **State & Properties:** `WorkerServer.Engine`, `WorkerServer.NodeID`, `WorkerServer.CertDir`, and `WorkerServer.Metrics`.
-- **Interactions:** Calls `WasmEngine.Execute`; serves health/readiness/metrics; uses mTLS server config.
+- **State & Properties:** `WorkerServer.Engine`, `WorkerServer.NodeID`, `WorkerServer.CertDir`, `WorkerServer.MasterURL`, optional callback HTTP client and timeout, and `WorkerServer.Metrics`.
+- **Interactions:** Calls `WasmEngine.Execute`; reports job completion to the master; serves health/readiness/metrics; uses mTLS server config.
 
 ### `internal/worker/engine.go`
 
@@ -640,7 +641,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ##### `func (g *Gateway) Handler() http.Handler`
 
 - **Return Values:** HTTP handler with master routes wrapped by logging middleware.
-- **Routes:** `/wasmcat/health`, `/wasmcat/ready`, `/wasmcat/metrics`, `/internal/register`, `/internal/heartbeat`, `/internal/drain`, `/api/v1/execute`, `/api/v1/jobs`, `/api/v1/jobs/{request_id}`.
+- **Routes:** `/wasmcat/health`, `/wasmcat/ready`, `/wasmcat/metrics`, `/internal/register`, `/internal/heartbeat`, `/internal/drain`, `/internal/jobs/complete`, `/api/v1/execute`, `/api/v1/jobs`, `/api/v1/jobs/{request_id}`.
 - **Side Effects:** None until the returned handler is used.
 
 ##### `func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request)`
@@ -696,6 +697,13 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Return Values:** 200 `JobResponse` when the durable job exists.
 - **Error Handling:** 405 wrong method, 403 unauthorized execution client, 503 if no job store is configured, 400 invalid or missing request ID, 404 `job_not_found`, 503 store read failure.
 - **Side Effects:** Reads durable job state from `JobStore`; does not dispatch work or mutate job state.
+
+##### `func (g *Gateway) handleJobCompletion(w http.ResponseWriter, r *http.Request)`
+
+- **Parameters:** JSON `shared.JobCompletionRequest` from a worker.
+- **Return Values:** 200 `APIResponse` when the completion is recorded.
+- **Error Handling:** 405 wrong method, 413 body too large, 503 missing job store, 400 invalid JSON/completion payload, 403 worker certificate identity mismatch, 404 unknown job, 503 store write failure.
+- **Side Effects:** Marks the durable job `succeeded` with an `ExecutionResponse` or `failed` with the worker error. It validates that the caller certificate is allowed to claim the supplied `worker_id`.
 
 ##### `func (g *Gateway) decodeExecutionRequest(w http.ResponseWriter, r *http.Request) (shared.ExecutionRequest, bool)`
 
@@ -1010,7 +1018,14 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Parameters:** JSON execution request.
 - **Return Values:** JSON execution response with `RequestID`, `Result`, `ExecutionTimeMs`, and `ExecutedOnNodeID`.
 - **Error Handling:** 400 invalid body/validation failure/execution failure.
-- **Side Effects:** Applies HTTP body limit, executes module through engine.
+- **Side Effects:** Applies HTTP body limit, executes module through engine, and reports job completion back to the master when `MasterURL` is configured.
+
+##### `func (s *WorkerServer) reportJobCompletion(completion shared.JobCompletionRequest)`
+
+- **Parameters:** Completion payload containing request ID, worker ID, status, and response or error.
+- **Return Values:** None.
+- **Error Handling:** Logs marshal, client creation, request creation, transport, timeout, and non-2xx response failures.
+- **Side Effects:** Sends `POST /internal/jobs/complete` to the configured master URL using the worker certificate unless a test client is injected.
 
 ##### `func (s *WorkerServer) Start(ctx context.Context, port string) error`
 
@@ -1256,6 +1271,7 @@ All runtime endpoints are served over HTTPS with mTLS enabled.
 | Master | `POST` | `/internal/register` | `WorkerNode` | `APIResponse` | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch. |
 | Master | `POST` | `/internal/heartbeat` | `Heartbeat` | 200 empty body | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
 | Master | `POST` | `/internal/drain` | `DrainRequest` | `APIResponse` | 405 wrong method, 413 body too large, 400 invalid JSON, 403 certificate identity mismatch, 404 unknown worker. |
+| Master | `POST` | `/internal/jobs/complete` | `JobCompletionRequest` | `APIResponse` | 405 wrong method, 413 body too large, 503 missing job store, 400 invalid JSON/request, 403 certificate identity mismatch, 404 unknown job, 503 store failure. |
 | Master | `POST` | `/api/v1/execute` | `ExecutionRequest` | `ExecutionResponse` | 405 wrong method, 413 body too large, 403 unauthorized execution client, 403 module policy violation, 409 duplicate/conflicting request ID, 400 invalid JSON/request, 503 dispatch failure. |
 | Master | `POST` | `/api/v1/jobs` | `ExecutionRequest` | `JobResponse` | 405 wrong method, 503 missing job store, 413 body too large, 403 unauthorized execution client, 403 module policy violation, 409 conflicting request ID, 400 invalid JSON/request, 503 store failure. |
 | Master | `GET` | `/api/v1/jobs/{request_id}` | none | `JobResponse` | 405 wrong method, 403 unauthorized execution client, 400 invalid request ID, 404 unknown job, 503 job store unavailable/read failure. |
@@ -1329,7 +1345,7 @@ output_len = uint32(result)
 - **Module cache key fallback:** Digest is preferred for cache identity. If no digest is provided, the worker falls back to module URL, then module name.
 - **Cache byte accounting is approximate:** `MAX_CACHE_BYTES` uses raw WASM byte size, not exact compiled runtime memory.
 - **Cold fetch coalescing is process-local:** Concurrent cold requests for the same cache key share one download/compile inside a worker process. Separate workers still compile independently.
-- **Durable job reliability is partial:** normal master startup persists accepted jobs and successful responses in SQLite, so duplicate completed `request_id` calls can survive restart. Recovery loops and async job submission exist, but worker completion callbacks are still a future HA phase.
+- **Durable job reliability is partial:** normal master startup persists accepted jobs and successful responses in SQLite, async job submission exists, and workers report completion back to the master. Jobs can still become `ambiguous` if both the synchronous response and bounded completion callback fail.
 - **Health/readiness require mTLS:** Because TLS client auth is configured at server level, probes must present valid client certificates unless TLS routing changes.
 - **Development cert generation overwrites at runtime:** `GenerateCAAndCerts` uses `os.Create`. Production should set `AUTO_GENERATE_CERTS=false`; bootstrap protects generated files unless `--force` is used.
 - **Telemetry is host-level, not cgroup-level:** gopsutil reports host CPU and memory. It does not currently account for per-service cgroup quotas.

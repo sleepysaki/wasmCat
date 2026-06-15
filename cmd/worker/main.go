@@ -51,9 +51,10 @@ func main() {
 	})
 
 	server := &worker.WorkerServer{
-		Engine:  engine,
-		NodeID:  cfg.NodeID,
-		CertDir: cfg.CertDir,
+		Engine:    engine,
+		NodeID:    cfg.NodeID,
+		CertDir:   cfg.CertDir,
+		MasterURL: cfg.MasterURL,
 	}
 
 	// This runs in the background and pings the Master every 5 seconds

@@ -2,6 +2,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -11,18 +12,24 @@ import (
 	"log/slog"
 	"net/http" // http server to listen for requests from the main process and respond with results
 	"os"
+	"strings"
 	"time"
 	"wasmcat/internal/logging"
 	"wasmcat/internal/security"
 	"wasmcat/internal/shared"
 )
 
+const DefaultJobCompletionTimeout = 5 * time.Second
+
 // Dependency injection -> inject engine into server struct so the server can call its methods
 type WorkerServer struct {
-	Engine  *WasmEngine
-	NodeID  string
-	CertDir string
-	Metrics *shared.Metrics
+	Engine            *WasmEngine
+	NodeID            string
+	CertDir           string
+	MasterURL         string
+	CompletionClient  *http.Client
+	CompletionTimeout time.Duration
+	Metrics           *shared.Metrics
 }
 
 func (s *WorkerServer) Handler() http.Handler {
@@ -115,15 +122,23 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	}
 	req.RequestID = requestID
 
-	// Now that JSON is valid, ask the engine to run the module.
-	// r.Context() connects execution to the HTTP request, so cancellation can flow downward.
+	// The execution context intentionally starts from Background instead of the
+	// inbound HTTP request. If the master restarts after dispatching, the worker
+	// should still finish bounded execution and report completion through the
+	// callback path instead of losing the result with the broken connection.
 	slog.Info("worker execution request received", "request_id", req.RequestID, "module_name", req.ModuleName, "module_digest", req.ModuleDigest)
-	result, err := s.Engine.ExecuteWithDigest(r.Context(), req.ModuleName, req.ModuleURL, req.ModuleDigest, req.Payload, req.JITBearerToken)
+	result, err := s.Engine.ExecuteWithDigest(context.Background(), req.ModuleName, req.ModuleURL, req.ModuleDigest, req.Payload, req.JITBearerToken)
 	if err != nil {
 		errorCode := workerExecutionErrorCode(err)
 		s.metrics().IncWorkerExecutionFailure()
 		s.observeWorkerExecutionError(errorCode)
 		slog.Error("worker execution request failed", "request_id", req.RequestID, "module_name", req.ModuleName, "duration_ms", time.Since(start).Milliseconds(), "error", err)
+		s.reportJobCompletion(shared.JobCompletionRequest{
+			RequestID: req.RequestID,
+			WorkerID:  s.NodeID,
+			Status:    shared.JobCompletionFailed,
+			Error:     err.Error(),
+		})
 		shared.WriteError(w, http.StatusBadRequest, errorCode, err)
 		return
 	}
@@ -138,7 +153,76 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 		ExecutedOnNodeID: s.NodeID,
 	}
 	slog.Info("worker execution request completed", "request_id", req.RequestID, "module_name", req.ModuleName, "duration_ms", durationMs)
+	s.reportJobCompletion(shared.JobCompletionRequest{
+		RequestID: req.RequestID,
+		WorkerID:  s.NodeID,
+		Status:    shared.JobCompletionSucceeded,
+		Response:  &resp,
+	})
 	shared.WriteJSON(w, http.StatusOK, resp)
+}
+
+func (s *WorkerServer) reportJobCompletion(completion shared.JobCompletionRequest) {
+	masterURL := strings.TrimRight(strings.TrimSpace(s.MasterURL), "/")
+	if masterURL == "" {
+		return
+	}
+
+	payload, err := json.Marshal(completion)
+	if err != nil {
+		slog.Warn("job completion marshal failed", "request_id", completion.RequestID, "worker_id", completion.WorkerID, "error", err)
+		return
+	}
+
+	timeout := s.completionTimeout()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, masterURL+"/internal/jobs/complete", bytes.NewReader(payload))
+	if err != nil {
+		slog.Warn("job completion request creation failed", "request_id", completion.RequestID, "worker_id", completion.WorkerID, "error", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client, err := s.completionHTTPClient()
+	if err != nil {
+		slog.Warn("job completion client creation failed", "request_id", completion.RequestID, "worker_id", completion.WorkerID, "error", err)
+		return
+	}
+
+	resp, err := shared.DoWithRetry(client, req)
+	if err != nil {
+		slog.Warn("job completion callback failed", "request_id", completion.RequestID, "worker_id", completion.WorkerID, "error", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		slog.Warn("job completion callback rejected", "request_id", completion.RequestID, "worker_id", completion.WorkerID, "status", resp.Status)
+		return
+	}
+	slog.Info("job completion callback recorded", "request_id", completion.RequestID, "worker_id", completion.WorkerID, "status", completion.Status)
+}
+
+func (s *WorkerServer) completionHTTPClient() (*http.Client, error) {
+	if s.CompletionClient != nil {
+		return s.CompletionClient, nil
+	}
+
+	certDir := s.CertDir
+	if certDir == "" {
+		certDir = "./certs"
+	}
+
+	return security.NewMTLSHTTPClient(security.WorkerCertPath(certDir, s.NodeID), security.WorkerKeyPath(certDir, s.NodeID), security.CACertPath(certDir))
+}
+
+func (s *WorkerServer) completionTimeout() time.Duration {
+	if s.CompletionTimeout > 0 {
+		return s.CompletionTimeout
+	}
+
+	return DefaultJobCompletionTimeout
 }
 
 func workerExecutionErrorCode(err error) string {

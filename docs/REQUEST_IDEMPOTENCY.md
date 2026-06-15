@@ -12,7 +12,7 @@ When an execution request reaches the master:
 4. If the same `request_id` and same fingerprint arrive while the first request is still running, the gateway returns `409 request_in_progress`.
 5. If the same `request_id` and same fingerprint arrive after success, the gateway returns the stored `ExecutionResponse` without dispatching to a worker again.
 6. If the same `request_id` is reused with different request content, the gateway returns `409 request_id_conflict`.
-7. If dispatch fails, the durable job records `failed` and `last_error`. It can be inspected through `GET /api/v1/jobs/{request_id}`.
+7. If dispatch fails, the durable job records `failed` and `last_error`. Workers also report final success or failure through `/internal/jobs/complete`, giving the master a second persistence path for completed work.
 8. If the request arrives on `POST /api/v1/jobs`, the gateway only creates or returns the durable job. New jobs return `202 Accepted`; matching duplicates return `200 OK`; dispatch is handled later by the recovery loop.
 
 ## Configuration

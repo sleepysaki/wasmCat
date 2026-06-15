@@ -64,6 +64,7 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("/internal/register", g.handleRegister)
 	mux.HandleFunc("/internal/heartbeat", g.handleHeartbeat)
 	mux.HandleFunc("/internal/drain", g.handleDrain)
+	mux.HandleFunc("/internal/jobs/complete", g.handleJobCompletion)
 	mux.HandleFunc("/api/v1/execute", g.handleExecute)
 	mux.HandleFunc("/api/v1/jobs", g.handleCreateJob)
 	mux.HandleFunc("/api/v1/jobs/", g.handleGetJob)
@@ -211,6 +212,69 @@ func (g *Gateway) handleDrain(w http.ResponseWriter, r *http.Request) {
 		Status:  "success",
 		Message: "Worker marked as draining",
 	})
+}
+
+func (g *Gateway) handleJobCompletion(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	limitRequestBody(w, r, internalControlMaxBodyBytes)
+	if g.JobStore == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "not_ready", fmt.Errorf("job store is not configured"))
+		return
+	}
+
+	var completion shared.JobCompletionRequest
+	if err := json.NewDecoder(r.Body).Decode(&completion); err != nil {
+		if isBodyTooLargeError(err) {
+			shared.WriteError(w, http.StatusRequestEntityTooLarge, "request_body_too_large", err)
+			return
+		}
+		shared.WriteError(w, http.StatusBadRequest, "invalid_job_completion", err)
+		return
+	}
+	if err := completion.Validate(); err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid_job_completion", err)
+		return
+	}
+	if err := validateWorkerPeerIdentity(r, completion.WorkerID); err != nil {
+		shared.WriteError(w, http.StatusForbidden, "worker_identity_mismatch", err)
+		return
+	}
+
+	switch completion.Status {
+	case shared.JobCompletionSucceeded:
+		response := *completion.Response
+		response.RequestID = completion.RequestID
+		if response.ExecutedOnNodeID == "" {
+			response.ExecutedOnNodeID = completion.WorkerID
+		}
+		if err := g.JobStore.MarkSucceeded(context.Background(), completion.RequestID, response); err != nil {
+			g.writeJobCompletionStoreError(w, err)
+			return
+		}
+	case shared.JobCompletionFailed:
+		if err := g.JobStore.MarkFailed(context.Background(), completion.RequestID, completion.Error); err != nil {
+			g.writeJobCompletionStoreError(w, err)
+			return
+		}
+	default:
+		shared.WriteError(w, http.StatusBadRequest, "invalid_job_completion", fmt.Errorf("unsupported completion status %q", completion.Status))
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, shared.APIResponse{
+		Status:  "success",
+		Message: "Job completion recorded",
+	})
+}
+
+func (g *Gateway) writeJobCompletionStoreError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrJobNotFound) {
+		shared.WriteError(w, http.StatusNotFound, "job_not_found", err)
+		return
+	}
+	shared.WriteError(w, http.StatusServiceUnavailable, "dispatch_failed", err)
 }
 
 // Start the HTTP server and set up the routes for worker registration and heartbeat
