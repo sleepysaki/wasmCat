@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>wasmCat Console</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">wC</span>
+        <div>
+          <strong>wasmCat</strong>
+          <span>Operator Console</span>
+        </div>
+      </div>
+      <nav class="nav" aria-label="Primary">
+        <button class="nav-item active" data-view="dashboard">Dashboard</button>
+        <button class="nav-item" data-view="workers">Workers</button>
+        <button class="nav-item" data-view="execute">Execute</button>
+        <button class="nav-item" data-view="jobs">Jobs</button>
+        <button class="nav-item" data-view="metrics">Metrics</button>
+        <button class="nav-item" data-view="settings">Settings</button>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="view-title">Dashboard</h1>
+          <p id="view-subtitle">Cluster readiness, workers, and execution activity.</p>
+        </div>
+        <div class="topbar-actions">
+          <button id="refresh-btn" class="button secondary" type="button">Refresh</button>
+          <span id="connection-state" class="status neutral">Not checked</span>
+        </div>
+      </header>
+
+      <section id="dashboard-view" class="view active">
+        <div class="summary-grid">
+          <div class="metric-tile">
+            <span>Master health</span>
+            <strong id="health-value">-</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Readiness</span>
+            <strong id="ready-value">-</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Active workers</span>
+            <strong id="active-workers-value">-</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Dispatch success</span>
+            <strong id="dispatch-success-value">-</strong>
+          </div>
+        </div>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Recent Cluster State</h2>
+            <span id="last-refresh">Never refreshed</span>
+          </div>
+          <div id="dashboard-message" class="message">Load cluster state to begin.</div>
+        </section>
+      </section>
+
+      <section id="workers-view" class="view">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Workers</h2>
+            <button id="workers-refresh" class="button secondary" type="button">Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Address</th>
+                  <th>State</th>
+                  <th>CPU free</th>
+                  <th>RAM free</th>
+                  <th>Location</th>
+                  <th>Last seen</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="workers-table"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="execute-view" class="view">
+        <form id="execute-form" class="form-grid">
+          <label>
+            Request ID
+            <input name="request_id" placeholder="req_demo_001" />
+          </label>
+          <label>
+            Module name
+            <input name="module_name" required placeholder="hello" />
+          </label>
+          <label>
+            Module URL
+            <input name="module_url" placeholder="https://example.com/hello.wasm" />
+          </label>
+          <label>
+            ACR registry URL
+            <input name="module_registry_url" placeholder="https://registry.azurecr.io/v2/repo/manifests/latest" />
+          </label>
+          <label>
+            Module digest
+            <input name="module_digest" placeholder="sha256:&lt;digest&gt;" />
+          </label>
+          <label>
+            User latitude
+            <input name="user_lat" type="number" step="any" />
+          </label>
+          <label>
+            User longitude
+            <input name="user_lon" type="number" step="any" />
+          </label>
+          <label class="wide">
+            Payload
+            <textarea name="payload" rows="8" placeholder='{"message":"hello wasmCat"}'></textarea>
+          </label>
+          <div class="form-actions wide">
+            <button class="button primary" type="submit">Execute Now</button>
+            <button id="create-job-from-execute" class="button secondary" type="button">Create Durable Job</button>
+          </div>
+        </form>
+        <pre id="execute-result" class="output"></pre>
+      </section>
+
+      <section id="jobs-view" class="view">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Find Job</h2>
+          </div>
+          <form id="job-get-form" class="inline-form">
+            <input name="request_id" required placeholder="req_job_001" />
+            <button class="button primary" type="submit">Get Job</button>
+          </form>
+          <pre id="job-result" class="output compact"></pre>
+        </section>
+      </section>
+
+      <section id="metrics-view" class="view">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Metrics</h2>
+            <button id="metrics-refresh" class="button secondary" type="button">Refresh</button>
+          </div>
+          <div id="metrics-grid" class="summary-grid"></div>
+          <pre id="metrics-json" class="output"></pre>
+        </section>
+      </section>
+
+      <section id="settings-view" class="view">
+        <form id="settings-form" class="form-grid">
+          <label class="wide">
+            Config file
+            <input id="config-path" disabled />
+          </label>
+          <label>
+            Master URL
+            <input name="master_url" required placeholder="https://localhost:7270" />
+          </label>
+          <label>
+            CA certificate
+            <input name="ca_cert" required placeholder="./local/certs/ca.crt" />
+          </label>
+          <label>
+            Client certificate
+            <input name="client_cert" required placeholder="./local/certs/client.crt" />
+          </label>
+          <label>
+            Client key
+            <input name="client_key" required placeholder="./local/certs/client.key" />
+          </label>
+          <label>
+            Default latitude
+            <input name="default_user_lat" type="number" step="any" required />
+          </label>
+          <label>
+            Default longitude
+            <input name="default_user_lon" type="number" step="any" required />
+          </label>
+          <label>
+            Output
+            <select name="output">
+              <option value="table">table</option>
+              <option value="json">json</option>
+            </select>
+          </label>
+          <div class="form-actions wide">
+            <button class="button primary" type="submit">Save Settings</button>
+          </div>
+        </form>
+        <div id="settings-message" class="message"></div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>
