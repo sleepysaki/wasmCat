@@ -38,8 +38,10 @@ Each release publishes:
 ```text
 wasmcat-master-linux-amd64
 wasmcat-worker-linux-amd64
+wasmcatctl-linux-amd64
 wasmcat-master-windows-amd64.exe
 wasmcat-worker-windows-amd64.exe
+wasmcatctl-windows-amd64.exe
 wasmcat-master.service
 wasmcat-worker.service
 wasmcat-master.env
@@ -57,6 +59,7 @@ The intended production install flow is:
 download release assets
 verify checksums
 install master or worker binary
+install wasmcatctl for operator commands
 run init
 provide certificates
 install service file
@@ -86,4 +89,4 @@ This approach keeps wasmCat lightweight:
 - no custom installer service
 - no hidden bootstrap process
 
-The release artifact is just the binary, service templates, and checksums.
+The release artifact is just the binaries, service templates, and checksums.

@@ -17,7 +17,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Dependency injection:** `Gateway`, `Dispatcher`, and `WorkerServer` receive dependencies as struct fields, which also makes handler tests possible.
 - **In-memory registry/cache:** Worker state is held in `Registry.workers`; compiled modules are held in `WasmEngine.cache`. Execution jobs are persisted in SQLite when the master runs with a `JobStore`.
 - **Event-loop background tasks:** Master cleanup and worker telemetry run on tickers controlled by cancellation contexts.
-- **Native release packaging:** `scripts/build.*`, systemd templates, and GitHub release workflow distribute binaries and service files.
+- **Native release packaging:** `scripts/build.*`, systemd templates, and GitHub release workflow distribute master, worker, `wasmcatctl`, and service files.
 
 ### Control Flow
 
@@ -45,6 +45,14 @@ The core responsibility is to execute WASM modules on registered workers without
 7. `WorkerServer` is constructed with the engine, node ID, certificate directory, and master URL for completion callbacks.
 8. `StartTelemetry` runs in a goroutine, registering the worker with configured latitude/longitude and sending periodic CPU/RAM heartbeats over mTLS.
 9. `WorkerServer.Start` loads CA/worker certificates, starts an HTTPS server requiring client certificates, and blocks until shutdown or server error.
+
+#### wasmcatctl operator lifecycle
+
+1. `cmd/wasmcatctl/main.go` parses the requested operator command.
+2. `internal/ctl.LoadConfig` reads `~/.wasmcat/config.json`, unless `--config` points at another file.
+3. Global flags such as `--master`, `--ca`, `--cert`, `--key`, `--output`, and `--timeout` override config values for one command.
+4. `internal/ctl.NewClient` creates an mTLS HTTP client using the configured CA, client certificate, and private key.
+5. The command calls the master API and prints table-style output for humans or JSON for automation.
 
 #### Execution request lifecycle
 
@@ -92,6 +100,18 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Name & Responsibility:** Worker process entrypoint. Handles `wasmcat-worker init` and normal worker runtime startup.
 - **State & Properties:** Local references to `WorkerConfig`, `WasmEngine`, `WorkerServer`; process root context.
 - **Interactions:** Calls `bootstrap.InitWorker`, `config.LoadWorker`, `worker.NewWasmEngineWithLimits`, `worker.StartTelemetry`, `WorkerServer.Start`.
+
+### `cmd/wasmcatctl/main.go`
+
+- **Name & Responsibility:** Operator CLI entrypoint. Provides short commands for health, readiness, metrics, worker listing, synchronous execution, durable job creation/querying, and worker draining.
+- **State & Properties:** Parses global flags, command flags, output mode, timeout, and optional config path. It stores no cluster state.
+- **Interactions:** Calls `internal/ctl` to load config, build an mTLS client, call master APIs, and format responses.
+
+### `internal/ctl`
+
+- **Name & Responsibility:** Shared implementation for the `wasmcatctl` binary.
+- **State & Properties:** `Config` stores master URL, certificate paths, default user coordinates, and output mode. `Client` stores this config and an HTTP client.
+- **Interactions:** Reuses `internal/security.NewMTLSHTTPClient`, `internal/shared` models, and master endpoints such as `/api/v1/execute`, `/api/v1/jobs`, `/api/v1/workers`, and `/internal/drain`.
 
 ### `internal/bootstrap/bootstrap.go`
 
@@ -245,7 +265,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 ### Packaging, CI, and release files
 
-- **`scripts/build.sh` / `scripts/build.ps1`:** Cross-compile native master/worker binaries, copy systemd/env templates, and write `checksums.txt`.
+- **`scripts/build.sh` / `scripts/build.ps1`:** Cross-compile native master, worker, and `wasmcatctl` binaries, copy systemd/env templates, and write `checksums.txt`.
 - **`.github/workflows/ci.yml`:** Pull request and main branch quality gates.
 - **`.github/workflows/release.yml`:** Tag-triggered native release publishing.
 - **`packaging/systemd/*`:** Service and env templates for Linux hosts.

@@ -68,6 +68,7 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/execute", g.handleExecute)
 	mux.HandleFunc("/api/v1/jobs", g.handleCreateJob)
 	mux.HandleFunc("/api/v1/jobs/", g.handleGetJob)
+	mux.HandleFunc("/api/v1/workers", g.handleListWorkers)
 	return logging.MiddlewareWithMetrics("master", mux, g.metrics())
 }
 
@@ -452,6 +453,22 @@ func (g *Gateway) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shared.WriteJSON(w, http.StatusOK, jobResponse(job))
+}
+
+func (g *Gateway) handleListWorkers(w http.ResponseWriter, r *http.Request) {
+	if !shared.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if err := g.validateExecuteClientIdentity(r); err != nil {
+		shared.WriteError(w, http.StatusForbidden, "execute_client_unauthorized", err)
+		return
+	}
+	if g.Registry == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "not_ready", fmt.Errorf("worker registry is not initialized"))
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, g.Registry.GetActiveWorkers())
 }
 
 func (g *Gateway) decodeExecutionRequest(w http.ResponseWriter, r *http.Request) (shared.ExecutionRequest, bool) {

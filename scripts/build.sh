@@ -33,8 +33,10 @@ build_binary() {
 
 build_binary "wasmcat-master" "./cmd/master" "linux" "amd64"
 build_binary "wasmcat-worker" "./cmd/worker" "linux" "amd64"
+build_binary "wasmcatctl" "./cmd/wasmcatctl" "linux" "amd64"
 build_binary "wasmcat-master" "./cmd/master" "windows" "amd64"
 build_binary "wasmcat-worker" "./cmd/worker" "windows" "amd64"
+build_binary "wasmcatctl" "./cmd/wasmcatctl" "windows" "amd64"
 
 cp "$ROOT_DIR"/packaging/systemd/wasmcat-* "$DIST_DIR"/
 

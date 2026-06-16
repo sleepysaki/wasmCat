@@ -42,8 +42,10 @@ function Build-Binary {
 
 Build-Binary -Name "wasmcat-master" -Package "./cmd/master" -TargetOS "linux" -TargetArch "amd64"
 Build-Binary -Name "wasmcat-worker" -Package "./cmd/worker" -TargetOS "linux" -TargetArch "amd64"
+Build-Binary -Name "wasmcatctl" -Package "./cmd/wasmcatctl" -TargetOS "linux" -TargetArch "amd64"
 Build-Binary -Name "wasmcat-master" -Package "./cmd/master" -TargetOS "windows" -TargetArch "amd64"
 Build-Binary -Name "wasmcat-worker" -Package "./cmd/worker" -TargetOS "windows" -TargetArch "amd64"
+Build-Binary -Name "wasmcatctl" -Package "./cmd/wasmcatctl" -TargetOS "windows" -TargetArch "amd64"
 
 Copy-Item -Path (Join-Path $RootDir "packaging/systemd/wasmcat-*") -Destination $DistDir -Force
 
