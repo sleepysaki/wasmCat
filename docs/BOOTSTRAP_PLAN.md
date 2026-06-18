@@ -84,13 +84,11 @@ sudo wasmcat-worker init \
   --worker-id worker-us-01 \
   --master-url https://master.example.com:7270 \
   --advertise-address worker-us-01.example.com:7271 \
-  --latitude 40.7128 \
-  --longitude -74.0060 \
   --config-dir /etc/wasmcat \
   --cert-dir /etc/wasmcat/certs
 ```
 
-The worker command validates that `MASTER_URL` is an HTTPS URL and writes the same location and limit settings used by the worker runtime. If `--advertise-address` is omitted, the generated value defaults to `<hostname>:<worker-port>` and falls back to `localhost:<worker-port>` only when the OS hostname cannot be read.
+The worker command validates that `MASTER_URL` is an HTTPS URL and writes the same location policy and limit settings used by the worker runtime. If `--advertise-address` is omitted, the generated value defaults to `<hostname>:<worker-port>` and falls back to `localhost:<worker-port>` only when the OS hostname cannot be read. When `--latitude` and `--longitude` are omitted, `WORKER_AUTO_DETECT_LOCATION=true` lets the worker detect VM coordinates at startup before registering with the master.
 
 Operators must provide:
 

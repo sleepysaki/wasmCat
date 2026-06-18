@@ -43,12 +43,16 @@ Byte and count limits must be greater than zero. CPU scheduling thresholds must 
 | `WORKER_PORT` | `7271` | HTTPS port for the worker invoke server. |
 | `MASTER_URL` | `https://localhost:7270` | Master URL used for registration and heartbeat. |
 | `WORKER_ADVERTISE_ADDRESS` | `<hostname>:<worker-port>` | Address the master uses to call this worker. If the OS hostname cannot be read, the fallback is `localhost:<worker-port>`. |
-| `WORKER_LATITUDE` | `0` | Worker latitude used by the scheduler. Must be between `-90` and `90`. |
-| `WORKER_LONGITUDE` | `0` | Worker longitude used by the scheduler. Must be between `-180` and `180`. |
+| `WORKER_LATITUDE` | unset | Optional worker latitude override used by the scheduler. Must be set together with `WORKER_LONGITUDE`. |
+| `WORKER_LONGITUDE` | unset | Optional worker longitude override used by the scheduler. Must be set together with `WORKER_LATITUDE`. |
+| `WORKER_AUTO_DETECT_LOCATION` | `true` | Detect worker VM coordinates at startup when explicit worker coordinates are absent. |
+| `WORKER_LOCATION_PROVIDER_URL` | `https://ipapi.co/json/` | HTTP JSON endpoint used for worker IP-based location detection. |
 | `CERT_DIR` | `./certs` | Directory containing `ca.crt`, `worker-<id>.crt`, and `worker-<id>.key`. |
 | `HEARTBEAT_INTERVAL` | `5s` | Worker registration and heartbeat interval. |
 
 Worker registration and heartbeat require the mTLS client certificate identity to match `WORKER_ID`. The master accepts a certificate common name of `wasmcat-worker-<WORKER_ID>` or a DNS SAN containing either `<WORKER_ID>` or `wasmcat-worker-<WORKER_ID>`.
+
+Worker location is resolved before telemetry starts. If `WORKER_LATITUDE` and `WORKER_LONGITUDE` are set, those values are registered with the master. If both are omitted and `WORKER_AUTO_DETECT_LOCATION=true`, the worker queries `WORKER_LOCATION_PROVIDER_URL` and registers the detected coordinates. The provider response may use `latitude`/`longitude`, `lat`/`lon`, or `loc: "lat,lon"`.
 
 Set `WORKER_ADVERTISE_ADDRESS` explicitly in production when the OS hostname is not resolvable from the master, such as private IP deployments, split DNS, NAT, or custom service discovery. Use `localhost:<port>` only for same-host development.
 
@@ -72,11 +76,16 @@ Example:
 ```powershell
 $env:WORKER_ID="worker-us-01"
 $env:MASTER_URL="https://master.internal:7270"
-$env:WORKER_LATITUDE="40.7128"
-$env:WORKER_LONGITUDE="-74.0060"
 $env:CERT_DIR="C:\wasmcat\certs"
 $env:MAX_CONCURRENT_EXECS="8"
 go run ./cmd/worker
+```
+
+Use explicit coordinates only when you want to pin the worker to a known site:
+
+```powershell
+$env:WORKER_LATITUDE="40.7128"
+$env:WORKER_LONGITUDE="-74.0060"
 ```
 
 For production, mount certificates as secrets and disable local certificate generation:
@@ -86,3 +95,21 @@ $env:AUTO_GENERATE_CERTS="false"
 $env:CERT_DIR="C:\wasmcat\certs"
 go run ./cmd/master
 ```
+
+## wasmcatctl
+
+`wasmcatctl` stores operator settings in `~/.wasmcat/config.json` by default. These values are created by `wasmcatctl config init` and can be overridden per command with global flags such as `--master`, `--ca`, `--cert`, `--key`, and `--output`.
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `master_url` | `https://localhost:7270` | Master gateway URL used by the CLI. |
+| `ca_cert` | `./local/certs/ca.crt` | CA certificate used to verify the master certificate. |
+| `client_cert` | `./local/certs/worker-worker-vn-01.crt` | Client certificate presented to the master. |
+| `client_key` | `./local/certs/worker-worker-vn-01.key` | Private key for `client_cert`. |
+| `default_user_lat` | unset | Optional fallback latitude for geo-aware execution requests. |
+| `default_user_lon` | unset | Optional fallback longitude for geo-aware execution requests. |
+| `auto_detect_location` | `true` | Detect execution origin automatically when no command or fallback coordinates are provided. |
+| `location_provider_url` | `https://ipapi.co/json/` | HTTP JSON endpoint used for IP-based location detection. |
+| `output` | `table` | Default output format, either `table` or `json`. |
+
+Execution location is resolved by the CLI before it calls the master: command-line coordinates first, saved fallback coordinates second, and IP-based auto-detection last. A private deployment can replace `location_provider_url` with an internal endpoint to avoid depending on a public geolocation provider.

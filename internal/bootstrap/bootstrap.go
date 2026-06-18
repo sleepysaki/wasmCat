@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"wasmcat/internal/geolocation"
 	"wasmcat/internal/security"
 	"wasmcat/internal/shared"
 )
@@ -38,26 +39,31 @@ type MasterOptions struct {
 }
 
 type WorkerOptions struct {
-	ConfigDir          string
-	CertDir            string
-	WorkerID           string
-	Port               string
-	MasterURL          string
-	AdvertiseAddress   string
-	Latitude           float64
-	Longitude          float64
-	HeartbeatInterval  string
-	ExecutionTimeout   string
-	ModuleFetchTimeout string
-	ShutdownTimeout    string
-	MaxModuleBytes     int64
-	MaxPayloadBytes    int64
-	MaxOutputBytes     uint32
-	MaxConcurrentExecs int
-	MaxCachedModules   int
-	MaxCacheBytes      int64
-	ModuleCacheTTL     string
-	Force              bool
+	ConfigDir             string
+	CertDir               string
+	WorkerID              string
+	Port                  string
+	MasterURL             string
+	AdvertiseAddress      string
+	Latitude              float64
+	Longitude             float64
+	HasLatitude           bool
+	HasLongitude          bool
+	AutoDetectLocation    bool
+	HasAutoDetectLocation bool
+	LocationProviderURL   string
+	HeartbeatInterval     string
+	ExecutionTimeout      string
+	ModuleFetchTimeout    string
+	ShutdownTimeout       string
+	MaxModuleBytes        int64
+	MaxPayloadBytes       int64
+	MaxOutputBytes        uint32
+	MaxConcurrentExecs    int
+	MaxCachedModules      int
+	MaxCacheBytes         int64
+	ModuleCacheTTL        string
+	Force                 bool
 }
 
 type Result struct {
@@ -143,8 +149,8 @@ func InitWorker(options WorkerOptions) (Result, error) {
 		{"WORKER_PORT", options.Port},
 		{"MASTER_URL", options.MasterURL},
 		{"WORKER_ADVERTISE_ADDRESS", options.AdvertiseAddress},
-		{"WORKER_LATITUDE", strconv.FormatFloat(options.Latitude, 'f', -1, 64)},
-		{"WORKER_LONGITUDE", strconv.FormatFloat(options.Longitude, 'f', -1, 64)},
+		{"WORKER_AUTO_DETECT_LOCATION", strconv.FormatBool(options.AutoDetectLocation)},
+		{"WORKER_LOCATION_PROVIDER_URL", options.LocationProviderURL},
 		{"CERT_DIR", options.CertDir},
 		{"HEARTBEAT_INTERVAL", options.HeartbeatInterval},
 		{"EXECUTION_TIMEOUT", options.ExecutionTimeout},
@@ -157,6 +163,12 @@ func InitWorker(options WorkerOptions) (Result, error) {
 		{"MAX_CACHED_MODULES", strconv.Itoa(options.MaxCachedModules)},
 		{"MAX_CACHE_BYTES", strconv.FormatInt(options.MaxCacheBytes, 10)},
 		{"MODULE_CACHE_TTL", options.ModuleCacheTTL},
+	}
+	if options.HasLatitude && options.HasLongitude {
+		values = append([]envValue{
+			{"WORKER_LATITUDE", strconv.FormatFloat(options.Latitude, 'f', -1, 64)},
+			{"WORKER_LONGITUDE", strconv.FormatFloat(options.Longitude, 'f', -1, 64)},
+		}, values...)
 	}
 
 	if err := writeEnvFile(configPath, values, options.Force); err != nil {
@@ -247,6 +259,12 @@ func normalizeWorker(options WorkerOptions) WorkerOptions {
 	if options.ModuleCacheTTL == "" {
 		options.ModuleCacheTTL = "30m"
 	}
+	if !options.HasAutoDetectLocation {
+		options.AutoDetectLocation = true
+	}
+	if options.LocationProviderURL == "" {
+		options.LocationProviderURL = geolocation.DefaultProviderURL
+	}
 	if options.CertDir == "" && options.ConfigDir != "" {
 		options.CertDir = filepath.Join(options.ConfigDir, "certs")
 	}
@@ -329,11 +347,13 @@ func validateWorker(options WorkerOptions) error {
 	if strings.TrimSpace(options.AdvertiseAddress) == "" {
 		return fmt.Errorf("worker advertise address is required")
 	}
-	if options.Latitude < -90 || options.Latitude > 90 {
-		return fmt.Errorf("worker latitude must be between -90 and 90")
+	if options.HasLatitude != options.HasLongitude {
+		return fmt.Errorf("worker latitude and longitude must be set together")
 	}
-	if options.Longitude < -180 || options.Longitude > 180 {
-		return fmt.Errorf("worker longitude must be between -180 and 180")
+	if options.HasLatitude {
+		if err := geolocation.Validate(options.Latitude, options.Longitude, "worker"); err != nil {
+			return err
+		}
 	}
 	if err := validatePositiveDuration("heartbeat interval", options.HeartbeatInterval); err != nil {
 		return fmt.Errorf("parse heartbeat interval: %w", err)

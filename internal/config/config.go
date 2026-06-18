@@ -1,11 +1,13 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"wasmcat/internal/geolocation"
 	"wasmcat/internal/shared"
 )
 
@@ -46,15 +48,18 @@ type MasterConfig struct {
 }
 
 type WorkerConfig struct {
-	Port              string
-	NodeID            string
-	MasterURL         string
-	AdvertiseAddress  string
-	Latitude          float64
-	Longitude         float64
-	CertDir           string
-	HeartbeatInterval time.Duration
-	Limits            Limits
+	Port                string
+	NodeID              string
+	MasterURL           string
+	AdvertiseAddress    string
+	Latitude            float64
+	Longitude           float64
+	LocationSource      string
+	AutoDetectLocation  bool
+	LocationProviderURL string
+	CertDir             string
+	HeartbeatInterval   time.Duration
+	Limits              Limits
 }
 
 func LoadMaster() (MasterConfig, error) {
@@ -175,37 +180,92 @@ func LoadWorker() (WorkerConfig, error) {
 	if err != nil {
 		return WorkerConfig{}, err
 	}
-	latitude, err := float64Env("WORKER_LATITUDE", 0)
+	autoDetectLocation, err := boolEnv("WORKER_AUTO_DETECT_LOCATION", true)
 	if err != nil {
 		return WorkerConfig{}, err
 	}
-	if latitude < -90 || latitude > 90 {
-		return WorkerConfig{}, fmt.Errorf("WORKER_LATITUDE must be between -90 and 90")
-	}
-	longitude, err := float64Env("WORKER_LONGITUDE", 0)
+	locationProviderURL := stringEnv("WORKER_LOCATION_PROVIDER_URL", geolocation.DefaultProviderURL)
+
+	latitude, longitude, locationSource, err := loadWorkerCoordinates()
 	if err != nil {
 		return WorkerConfig{}, err
 	}
-	if longitude < -180 || longitude > 180 {
-		return WorkerConfig{}, fmt.Errorf("WORKER_LONGITUDE must be between -180 and 180")
+	if locationSource == "" && autoDetectLocation {
+		locationSource = "auto_pending"
+	} else if locationSource == "" {
+		locationSource = "unset"
 	}
 
 	nodeID := stringEnv("WORKER_ID", "worker-vn-01")
 	port := stringEnv("WORKER_PORT", "7271")
 
 	cfg := WorkerConfig{
-		Port:              port,
-		NodeID:            nodeID,
-		MasterURL:         stringEnv("MASTER_URL", "https://localhost:7270"),
-		AdvertiseAddress:  stringEnv("WORKER_ADVERTISE_ADDRESS", shared.DefaultWorkerAdvertiseAddress(port)),
-		Latitude:          latitude,
-		Longitude:         longitude,
-		CertDir:           stringEnv("CERT_DIR", "./certs"),
-		HeartbeatInterval: heartbeatInterval,
-		Limits:            limits,
+		Port:                port,
+		NodeID:              nodeID,
+		MasterURL:           stringEnv("MASTER_URL", "https://localhost:7270"),
+		AdvertiseAddress:    stringEnv("WORKER_ADVERTISE_ADDRESS", shared.DefaultWorkerAdvertiseAddress(port)),
+		Latitude:            latitude,
+		Longitude:           longitude,
+		LocationSource:      locationSource,
+		AutoDetectLocation:  autoDetectLocation,
+		LocationProviderURL: locationProviderURL,
+		CertDir:             stringEnv("CERT_DIR", "./certs"),
+		HeartbeatInterval:   heartbeatInterval,
+		Limits:              limits,
 	}
 
 	return cfg, nil
+}
+
+func ResolveWorkerLocation(ctx context.Context, cfg WorkerConfig) (WorkerConfig, error) {
+	switch cfg.LocationSource {
+	case "env":
+		if err := geolocation.Validate(cfg.Latitude, cfg.Longitude, "worker"); err != nil {
+			return WorkerConfig{}, err
+		}
+		return cfg, nil
+	case "auto_pending", "":
+		if !cfg.AutoDetectLocation {
+			return WorkerConfig{}, fmt.Errorf("worker location is not configured; set WORKER_LATITUDE/WORKER_LONGITUDE or enable WORKER_AUTO_DETECT_LOCATION")
+		}
+		detected, err := geolocation.Detect(ctx, cfg.LocationProviderURL)
+		if err != nil {
+			return WorkerConfig{}, fmt.Errorf("auto-detect worker location: %w", err)
+		}
+		cfg.Latitude = detected.Latitude
+		cfg.Longitude = detected.Longitude
+		cfg.LocationSource = detected.Source
+		return cfg, nil
+	case "unset":
+		return WorkerConfig{}, fmt.Errorf("worker location is not configured; set WORKER_LATITUDE/WORKER_LONGITUDE or enable WORKER_AUTO_DETECT_LOCATION")
+	default:
+		return WorkerConfig{}, fmt.Errorf("unknown worker location source %q", cfg.LocationSource)
+	}
+}
+
+func loadWorkerCoordinates() (float64, float64, string, error) {
+	latValue, hasLat := os.LookupEnv("WORKER_LATITUDE")
+	lonValue, hasLon := os.LookupEnv("WORKER_LONGITUDE")
+	if hasLat != hasLon {
+		return 0, 0, "", fmt.Errorf("WORKER_LATITUDE and WORKER_LONGITUDE must be set together")
+	}
+	if !hasLat {
+		return 0, 0, "", nil
+	}
+
+	latitude, err := strconv.ParseFloat(strings.TrimSpace(latValue), 64)
+	if err != nil {
+		return 0, 0, "", fmt.Errorf("parse WORKER_LATITUDE: %w", err)
+	}
+	longitude, err := strconv.ParseFloat(strings.TrimSpace(lonValue), 64)
+	if err != nil {
+		return 0, 0, "", fmt.Errorf("parse WORKER_LONGITUDE: %w", err)
+	}
+	if err := geolocation.Validate(latitude, longitude, "worker"); err != nil {
+		return 0, 0, "", err
+	}
+
+	return latitude, longitude, "env", nil
 }
 
 func loadWorkerLimits() (Limits, error) {

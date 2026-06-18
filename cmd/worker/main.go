@@ -36,6 +36,12 @@ func main() {
 		slog.Error("failed to load worker config", "error", err)
 		return
 	}
+	cfg, err = config.ResolveWorkerLocation(ctx, cfg)
+	if err != nil {
+		slog.Error("failed to resolve worker location", "worker_id", cfg.NodeID, "error", err)
+		return
+	}
+	slog.Info("worker location resolved", "worker_id", cfg.NodeID, "latitude", cfg.Latitude, "longitude", cfg.Longitude, "source", cfg.LocationSource)
 
 	engine := worker.NewWasmEngineWithLimits(ctx, worker.Limits{
 		ExecutionTimeout:   cfg.Limits.ExecutionTimeout,
@@ -82,6 +88,8 @@ func runInit(args []string) error {
 	advertiseAddress := flags.String("advertise-address", "", "address the master uses to call this worker")
 	latitude := flags.Float64("latitude", 0, "worker latitude used by the scheduler")
 	longitude := flags.Float64("longitude", 0, "worker longitude used by the scheduler")
+	autoLocation := flags.Bool("auto-location", true, "auto-detect worker location when latitude and longitude are omitted")
+	locationProvider := flags.String("location-provider", "", "HTTP JSON endpoint used for worker location detection")
 	heartbeatInterval := flags.String("heartbeat-interval", "5s", "master heartbeat interval")
 	executionTimeout := flags.String("execution-timeout", "5s", "maximum execution duration")
 	moduleFetchTimeout := flags.String("module-fetch-timeout", "10s", "maximum module fetch duration")
@@ -98,31 +106,41 @@ func runInit(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	hasLatitude := flagWasPassed(flags, "latitude")
+	hasLongitude := flagWasPassed(flags, "longitude")
+	if hasLatitude != hasLongitude {
+		return fmt.Errorf("both --latitude and --longitude are required when overriding worker location")
+	}
 	if *maxOutputBytes > (1<<32)-1 {
 		return fmt.Errorf("max-output-bytes must fit in uint32")
 	}
 
 	result, err := bootstrap.InitWorker(bootstrap.WorkerOptions{
-		ConfigDir:          *configDir,
-		CertDir:            *certDir,
-		WorkerID:           *workerID,
-		Port:               *port,
-		MasterURL:          *masterURL,
-		AdvertiseAddress:   *advertiseAddress,
-		Latitude:           *latitude,
-		Longitude:          *longitude,
-		HeartbeatInterval:  *heartbeatInterval,
-		ExecutionTimeout:   *executionTimeout,
-		ModuleFetchTimeout: *moduleFetchTimeout,
-		ShutdownTimeout:    *shutdownTimeout,
-		MaxModuleBytes:     *maxModuleBytes,
-		MaxPayloadBytes:    *maxPayloadBytes,
-		MaxOutputBytes:     uint32(*maxOutputBytes),
-		MaxConcurrentExecs: *maxConcurrentExecs,
-		MaxCachedModules:   *maxCachedModules,
-		MaxCacheBytes:      *maxCacheBytes,
-		ModuleCacheTTL:     *moduleCacheTTL,
-		Force:              *force,
+		ConfigDir:             *configDir,
+		CertDir:               *certDir,
+		WorkerID:              *workerID,
+		Port:                  *port,
+		MasterURL:             *masterURL,
+		AdvertiseAddress:      *advertiseAddress,
+		Latitude:              *latitude,
+		Longitude:             *longitude,
+		HasLatitude:           hasLatitude,
+		HasLongitude:          hasLongitude,
+		AutoDetectLocation:    *autoLocation,
+		HasAutoDetectLocation: flagWasPassed(flags, "auto-location"),
+		LocationProviderURL:   *locationProvider,
+		HeartbeatInterval:     *heartbeatInterval,
+		ExecutionTimeout:      *executionTimeout,
+		ModuleFetchTimeout:    *moduleFetchTimeout,
+		ShutdownTimeout:       *shutdownTimeout,
+		MaxModuleBytes:        *maxModuleBytes,
+		MaxPayloadBytes:       *maxPayloadBytes,
+		MaxOutputBytes:        uint32(*maxOutputBytes),
+		MaxConcurrentExecs:    *maxConcurrentExecs,
+		MaxCachedModules:      *maxCachedModules,
+		MaxCacheBytes:         *maxCacheBytes,
+		ModuleCacheTTL:        *moduleCacheTTL,
+		Force:                 *force,
 	})
 	if err != nil {
 		return err
@@ -135,6 +153,17 @@ func runInit(args []string) error {
 	}
 
 	return nil
+}
+
+func flagWasPassed(flags *flag.FlagSet, name string) bool {
+	found := false
+	flags.Visit(func(flag *flag.Flag) {
+		if flag.Name == name {
+			found = true
+		}
+	})
+
+	return found
 }
 
 func defaultConfigDir() string {

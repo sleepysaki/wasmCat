@@ -3,22 +3,27 @@ package ctl
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"wasmcat/internal/geolocation"
 )
 
 const ConfigDirName = ".wasmcat"
+const DefaultLocationProviderURL = geolocation.DefaultProviderURL
 
 type Config struct {
-	MasterURL      string  `json:"master_url"`
-	CACert         string  `json:"ca_cert"`
-	ClientCert     string  `json:"client_cert"`
-	ClientKey      string  `json:"client_key"`
-	DefaultUserLat float64 `json:"default_user_lat"`
-	DefaultUserLon float64 `json:"default_user_lon"`
-	Output         string  `json:"output,omitempty"`
+	MasterURL           string  `json:"master_url"`
+	CACert              string  `json:"ca_cert"`
+	ClientCert          string  `json:"client_cert"`
+	ClientKey           string  `json:"client_key"`
+	DefaultUserLat      float64 `json:"default_user_lat,omitempty"`
+	DefaultUserLon      float64 `json:"default_user_lon,omitempty"`
+	AutoDetectLocation  bool    `json:"auto_detect_location"`
+	LocationProviderURL string  `json:"location_provider_url,omitempty"`
+	Output              string  `json:"output,omitempty"`
 }
 
 func DefaultConfigPath() (string, error) {
@@ -86,13 +91,13 @@ func DefaultLocalConfig() Config {
 	separator := string(os.PathSeparator)
 	certDir := "." + separator + "local" + separator + "certs"
 	return Config{
-		MasterURL:      "https://localhost:7270",
-		CACert:         filepath.Join(certDir, "ca.crt"),
-		ClientCert:     filepath.Join(certDir, "worker-worker-vn-01.crt"),
-		ClientKey:      filepath.Join(certDir, "worker-worker-vn-01.key"),
-		DefaultUserLat: 21.0278,
-		DefaultUserLon: 105.8342,
-		Output:         "table",
+		MasterURL:           "https://localhost:7270",
+		CACert:              filepath.Join(certDir, "ca.crt"),
+		ClientCert:          filepath.Join(certDir, "worker-worker-vn-01.crt"),
+		ClientKey:           filepath.Join(certDir, "worker-worker-vn-01.key"),
+		AutoDetectLocation:  true,
+		LocationProviderURL: DefaultLocationProviderURL,
+		Output:              "table",
 	}
 }
 
@@ -142,6 +147,15 @@ func (cfg *Config) ValidateForRequest() error {
 	if cfg.DefaultUserLon < -180 || cfg.DefaultUserLon > 180 {
 		return fmt.Errorf("default_user_lon must be between -180 and 180")
 	}
+	if cfg.LocationProviderURL != "" {
+		parsed, err := url.Parse(cfg.LocationProviderURL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return fmt.Errorf("location_provider_url must be an absolute URL")
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return fmt.Errorf("location_provider_url must use http or https")
+		}
+	}
 
 	return nil
 }
@@ -154,6 +168,10 @@ func (cfg *Config) normalize() {
 	cfg.Output = strings.ToLower(strings.TrimSpace(cfg.Output))
 	if cfg.Output == "" {
 		cfg.Output = "table"
+	}
+	cfg.LocationProviderURL = strings.TrimSpace(cfg.LocationProviderURL)
+	if cfg.AutoDetectLocation && cfg.LocationProviderURL == "" {
+		cfg.LocationProviderURL = DefaultLocationProviderURL
 	}
 }
 

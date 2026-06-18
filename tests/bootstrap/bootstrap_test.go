@@ -217,6 +217,8 @@ func TestInitWorkerWritesEnv(t *testing.T) {
 		AdvertiseAddress:   "worker-us-01.example.com:9444",
 		Latitude:           40.7128,
 		Longitude:          -74.006,
+		HasLatitude:        true,
+		HasLongitude:       true,
 		ShutdownTimeout:    "9s",
 		MaxModuleBytes:     10 << 20,
 		MaxPayloadBytes:    1 << 20,
@@ -237,6 +239,7 @@ func TestInitWorkerWritesEnv(t *testing.T) {
 	assertContains(t, env, "WORKER_ADVERTISE_ADDRESS=worker-us-01.example.com:9444\n")
 	assertContains(t, env, "WORKER_LATITUDE=40.7128\n")
 	assertContains(t, env, "WORKER_LONGITUDE=-74.006\n")
+	assertContains(t, env, "WORKER_AUTO_DETECT_LOCATION=true\n")
 	assertContains(t, env, "WORKER_SHUTDOWN_TIMEOUT=9s\n")
 	assertContains(t, env, "MAX_CONCURRENT_EXECS=8\n")
 	assertContains(t, env, "MAX_CACHED_MODULES=16\n")
@@ -266,6 +269,10 @@ func TestInitWorkerDefaultsAdvertiseAddressFromHostname(t *testing.T) {
 
 	env := readFile(t, result.ConfigPath)
 	assertContains(t, env, "WORKER_ADVERTISE_ADDRESS="+shared.DefaultWorkerAdvertiseAddress("9444")+"\n")
+	assertContains(t, env, "WORKER_AUTO_DETECT_LOCATION=true\n")
+	assertContains(t, env, "WORKER_LOCATION_PROVIDER_URL=https://ipapi.co/json/\n")
+	assertNotContains(t, env, "WORKER_LATITUDE=")
+	assertNotContains(t, env, "WORKER_LONGITUDE=")
 }
 
 func TestInitWorkerRejectsInvalidMasterURL(t *testing.T) {
@@ -327,6 +334,14 @@ func assertContains(t *testing.T, content string, expected string) {
 
 	if !strings.Contains(content, expected) {
 		t.Fatalf("expected %q to contain %q", content, expected)
+	}
+}
+
+func assertNotContains(t *testing.T, content string, unexpected string) {
+	t.Helper()
+
+	if strings.Contains(content, unexpected) {
+		t.Fatalf("expected %q not to contain %q", content, unexpected)
 	}
 }
 

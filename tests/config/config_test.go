@@ -1,6 +1,9 @@
 package config_test
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +54,12 @@ func TestLoadWorkerReadsEnvironment(t *testing.T) {
 	if cfg.Longitude != 100.5018 {
 		t.Fatalf("expected configured longitude, got %f", cfg.Longitude)
 	}
+	if cfg.LocationSource != "env" {
+		t.Fatalf("expected env location source, got %q", cfg.LocationSource)
+	}
+	if !cfg.AutoDetectLocation {
+		t.Fatal("expected worker auto-location default to stay enabled")
+	}
 	if cfg.CertDir != "C:\\wasmcat\\certs" {
 		t.Fatalf("expected configured cert dir, got %q", cfg.CertDir)
 	}
@@ -86,6 +95,56 @@ func TestLoadWorkerReadsEnvironment(t *testing.T) {
 	}
 	if cfg.Limits.ModuleCacheTTL != 5*time.Minute {
 		t.Fatalf("expected module cache ttl 5m, got %s", cfg.Limits.ModuleCacheTTL)
+	}
+}
+
+func TestResolveWorkerLocationUsesConfiguredCoordinates(t *testing.T) {
+	cfg := config.WorkerConfig{
+		Latitude:           13.7563,
+		Longitude:          100.5018,
+		LocationSource:     "env",
+		AutoDetectLocation: true,
+	}
+
+	resolved, err := config.ResolveWorkerLocation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("ResolveWorkerLocation returned error: %v", err)
+	}
+	if resolved.Latitude != 13.7563 || resolved.Longitude != 100.5018 || resolved.LocationSource != "env" {
+		t.Fatalf("unexpected resolved location: %+v", resolved)
+	}
+}
+
+func TestResolveWorkerLocationAutoDetectsWhenCoordinatesMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"latitude":40.7128,"longitude":-74.006}`))
+	}))
+	defer server.Close()
+
+	cfg := config.WorkerConfig{
+		LocationSource:      "auto_pending",
+		AutoDetectLocation:  true,
+		LocationProviderURL: server.URL,
+	}
+
+	resolved, err := config.ResolveWorkerLocation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("ResolveWorkerLocation returned error: %v", err)
+	}
+	if resolved.Latitude != 40.7128 || resolved.Longitude != -74.006 || resolved.LocationSource != "auto" {
+		t.Fatalf("unexpected resolved location: %+v", resolved)
+	}
+}
+
+func TestResolveWorkerLocationRequiresSource(t *testing.T) {
+	cfg := config.WorkerConfig{
+		LocationSource:     "unset",
+		AutoDetectLocation: false,
+	}
+
+	if _, err := config.ResolveWorkerLocation(context.Background(), cfg); err == nil {
+		t.Fatal("expected missing worker location error")
 	}
 }
 

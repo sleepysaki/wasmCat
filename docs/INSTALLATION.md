@@ -229,8 +229,6 @@ sudo wasmcat-worker init \
   --worker-id worker-us-01 \
   --master-url https://master.example.com:7270 \
   --advertise-address worker-us-01.example.com:7271 \
-  --latitude 40.7128 \
-  --longitude -74.0060 \
   --worker-shutdown-timeout 10s \
   --max-cached-modules 128 \
   --max-cache-bytes 268435456 \
@@ -252,8 +250,8 @@ The generated config includes the worker identity, master URL, advertised addres
 WORKER_ID=worker-us-01
 MASTER_URL=https://master.example.com:7270
 WORKER_ADVERTISE_ADDRESS=worker-us-01.example.com:7271
-WORKER_LATITUDE=40.7128
-WORKER_LONGITUDE=-74.006
+WORKER_AUTO_DETECT_LOCATION=true
+WORKER_LOCATION_PROVIDER_URL=https://ipapi.co/json/
 CERT_DIR=/etc/wasmcat/certs
 WORKER_SHUTDOWN_TIMEOUT=10s
 MAX_CONCURRENT_EXECS=4
@@ -263,6 +261,8 @@ MODULE_CACHE_TTL=30m
 ```
 
 `WORKER_ADVERTISE_ADDRESS` must be reachable from the master. The worker runtime and `wasmcat-worker init` default this value to `<hostname>:<worker-port>` when it is not set, which is safer than localhost for multi-host installs. Set it explicitly when the master should use a private IP, DNS name, or load-balancer address. Use `localhost:<port>` only for same-host development.
+
+Worker coordinates are detected automatically at startup when `WORKER_LATITUDE` and `WORKER_LONGITUDE` are omitted. Use `--latitude` and `--longitude` only when you need to pin the worker to a known site or when your cloud provider's public-IP geolocation is inaccurate.
 
 Copy or mount these files into `/etc/wasmcat/certs`:
 

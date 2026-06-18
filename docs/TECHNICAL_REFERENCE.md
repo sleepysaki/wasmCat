@@ -40,19 +40,21 @@ The core responsibility is to execute WASM modules on registered workers without
 2. If `init` is present, `runInit` parses flags and calls `bootstrap.InitWorker`, then exits.
 3. Normal startup calls `logging.Configure("worker")`.
 4. `signal.NotifyContext` creates a cancellable root context.
-5. `config.LoadWorker` reads worker identity, master URL, cert path, heartbeat interval, and execution limits. When `WORKER_ADVERTISE_ADDRESS` is unset, it defaults to `<hostname>:<worker-port>` and falls back to `localhost:<worker-port>` only if the OS hostname cannot be read.
+5. `config.LoadWorker` reads worker identity, master URL, cert path, heartbeat interval, execution limits, and worker location policy. When `WORKER_ADVERTISE_ADDRESS` is unset, it defaults to `<hostname>:<worker-port>` and falls back to `localhost:<worker-port>` only if the OS hostname cannot be read.
 6. `worker.NewWasmEngineWithLimits` creates a wazero runtime, digest-aware compiled module cache, mutex, in-flight compile tracker, and execution semaphore.
 7. `WorkerServer` is constructed with the engine, node ID, certificate directory, and master URL for completion callbacks.
-8. `StartTelemetry` runs in a goroutine, registering the worker with configured latitude/longitude and sending periodic CPU/RAM heartbeats over mTLS.
-9. `WorkerServer.Start` loads CA/worker certificates, starts an HTTPS server requiring client certificates, and blocks until shutdown or server error.
+8. `config.ResolveWorkerLocation` uses explicit `WORKER_LATITUDE`/`WORKER_LONGITUDE` first, or calls `WORKER_LOCATION_PROVIDER_URL` when `WORKER_AUTO_DETECT_LOCATION=true`, then records the resolved coordinates in `WorkerConfig`.
+9. `StartTelemetry` runs in a goroutine, registering the worker with the resolved latitude/longitude and sending periodic CPU/RAM heartbeats over mTLS.
+10. `WorkerServer.Start` loads CA/worker certificates, starts an HTTPS server requiring client certificates, and blocks until shutdown or server error.
 
 #### wasmcatctl operator lifecycle
 
 1. `cmd/wasmcatctl/main.go` parses the requested operator command.
 2. `internal/ctl.LoadConfig` reads `~/.wasmcat/config.json`, unless `--config` points at another file.
 3. Global flags such as `--master`, `--ca`, `--cert`, `--key`, `--output`, and `--timeout` override config values for one command.
-4. `internal/ctl.NewClient` creates an mTLS HTTP client using the configured CA, client certificate, and private key.
-5. The command calls the master API and prints table-style output for humans or JSON for automation.
+4. Execution commands call `internal/ctl.ResolveLocation` before contacting the master. The resolver uses explicit `--user-lat/--user-lon` values first, saved fallback coordinates second, and IP-based auto-detection through `location_provider_url` last.
+5. `internal/ctl.NewClient` creates an mTLS HTTP client using the configured CA, client certificate, and private key.
+6. The command calls the master API and prints table-style output for humans or JSON for automation.
 
 #### Execution request lifecycle
 
@@ -110,7 +112,7 @@ The core responsibility is to execute WASM modules on registered workers without
 ### `internal/ctl`
 
 - **Name & Responsibility:** Shared implementation for the `wasmcatctl` binary.
-- **State & Properties:** `Config` stores master URL, certificate paths, default user coordinates, and output mode. `Client` stores this config and an HTTP client.
+- **State & Properties:** `Config` stores master URL, certificate paths, optional fallback user coordinates, auto-location settings, and output mode. `Client` stores this config and an HTTP client. `Location` stores the resolved latitude, longitude, and source used for one execution request.
 - **Interactions:** Reuses `internal/security.NewMTLSHTTPClient`, `internal/shared` models, and master endpoints such as `/api/v1/execute`, `/api/v1/jobs`, `/api/v1/workers`, and `/internal/drain`.
 
 ### `internal/bootstrap/bootstrap.go`
@@ -1232,8 +1234,10 @@ The core responsibility is to execute WASM modules on registered workers without
 | `WORKER_PORT` | `7271` | TCP port string | HTTPS listen port for worker invocation server. |
 | `MASTER_URL` | `https://localhost:7270` | HTTPS URL | Master gateway URL used by telemetry. |
 | `WORKER_ADVERTISE_ADDRESS` | `<hostname>:<WORKER_PORT>` | host:port or URL | Address stored in registry and used by master dispatch. Falls back to `localhost:<WORKER_PORT>` only if the OS hostname is unavailable. |
-| `WORKER_LATITUDE` | `0` | float degrees, `-90` to `90` | Worker latitude stored during registration and used for distance scheduling. |
-| `WORKER_LONGITUDE` | `0` | float degrees, `-180` to `180` | Worker longitude stored during registration and used for distance scheduling. |
+| `WORKER_LATITUDE` | unset | float degrees, `-90` to `90` | Optional worker latitude override stored during registration and used for distance scheduling. Must be set with `WORKER_LONGITUDE`. |
+| `WORKER_LONGITUDE` | unset | float degrees, `-180` to `180` | Optional worker longitude override stored during registration and used for distance scheduling. Must be set with `WORKER_LATITUDE`. |
+| `WORKER_AUTO_DETECT_LOCATION` | `true` | Go boolean string | When explicit coordinates are absent, detect the worker VM location before registration. |
+| `WORKER_LOCATION_PROVIDER_URL` | `https://ipapi.co/json/` | HTTPS/HTTP URL | JSON endpoint used for worker IP geolocation. Supports `latitude`/`longitude`, `lat`/`lon`, or `loc`. |
 | `CERT_DIR` | `./certs` | Filesystem path | Directory containing `ca.crt`, `worker-<id>.crt`, and `worker-<id>.key`. |
 | `HEARTBEAT_INTERVAL` | `5s` | Go duration | Interval for worker registration and heartbeat loop. |
 | `EXECUTION_TIMEOUT` | `5s` | Go duration | Full worker execution path timeout. |
@@ -1352,7 +1356,7 @@ output_len = uint32(result)
 
 ### Edge Cases and Limitations
 
-- **Worker coordinates default to zero:** Operators must set `WORKER_LATITUDE` and `WORKER_LONGITUDE`; otherwise workers appear at `0,0`.
+- **Worker auto-location depends on network and provider accuracy:** When explicit coordinates are absent, the worker queries the configured geolocation provider at startup. Private deployments should use an internal provider or explicit coordinates if public-IP geolocation is inaccurate.
 - **Capacity thresholds are opt-in:** Defaults are zero, so every worker remains eligible unless operators set `MIN_WORKER_CPU_FREE` or `MIN_WORKER_RAM_FREE_MB`.
 - **Registry cleanup is timer-based:** `CLEANUP_INTERVAL` controls scan cadence and `WORKER_STALE_TIMEOUT` controls eviction age. Set stale timeout higher than heartbeat interval to tolerate normal jitter.
 - **ACR token cache is process-local:** Repeated dispatches for the same registry repository reuse a token until 30 seconds before expiry. Multiple master instances do not share token cache state.

@@ -97,7 +97,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		}
 		return ctl.WriteValue(stdout, cfg.Output, response)
 	case "execute":
-		req, err := parseExecutionFlags(remaining[1:], cfg)
+		req, err := parseExecutionFlags(ctx, remaining[1:], cfg)
 		if err != nil {
 			return err
 		}
@@ -230,11 +230,23 @@ func runConfig(args []string, stdout io.Writer) error {
 		output := flags.String("output", "", "default output format: table or json")
 		userLat := flags.Float64("user-lat", 0, "default user latitude")
 		userLon := flags.Float64("user-lon", 0, "default user longitude")
+		autoLocation := flags.Bool("auto-location", true, "auto-detect execution location when coordinates are omitted")
+		locationProvider := flags.String("location-provider", "", "HTTP JSON endpoint used for auto location detection")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
+		if flagWasPassed(flags, "user-lat") != flagWasPassed(flags, "user-lon") {
+			return fmt.Errorf("both --user-lat and --user-lon are required when saving a default execution location")
+		}
 		cfg := ctl.DefaultLocalConfig()
 		cfg = ctl.ApplyOverrides(cfg, *masterURL, *caCert, *clientCert, *clientKey, *output, *userLat, *userLon, flagWasPassed(flags, "user-lat"), flagWasPassed(flags, "user-lon"))
+		cfg.AutoDetectLocation = *autoLocation
+		if strings.TrimSpace(*locationProvider) != "" {
+			cfg.LocationProviderURL = *locationProvider
+		}
+		if err := cfg.ValidateForRequest(); err != nil {
+			return err
+		}
 		if err := ctl.SaveConfig(*configPath, cfg); err != nil {
 			return err
 		}
@@ -264,7 +276,7 @@ func runConfig(args []string, stdout io.Writer) error {
 	}
 }
 
-func parseExecutionFlags(args []string, cfg ctl.Config) (shared.ExecutionRequest, error) {
+func parseExecutionFlags(ctx context.Context, args []string, cfg ctl.Config) (shared.ExecutionRequest, error) {
 	flags := flag.NewFlagSet("wasmcatctl execute", flag.ContinueOnError)
 	requestID := flags.String("request-id", "", "stable request ID")
 	moduleName := flags.String("module", "", "module name")
@@ -273,13 +285,18 @@ func parseExecutionFlags(args []string, cfg ctl.Config) (shared.ExecutionRequest
 	moduleDigest := flags.String("digest", "", "expected module digest, for example sha256:<hex>")
 	payload := flags.String("payload", "", "payload string")
 	payloadFile := flags.String("payload-file", "", "file containing payload string")
-	userLat := flags.Float64("user-lat", cfg.DefaultUserLat, "user latitude")
-	userLon := flags.Float64("user-lon", cfg.DefaultUserLon, "user longitude")
+	userLat := flags.Float64("user-lat", 0, "user latitude; omit to use config or auto-detection")
+	userLon := flags.Float64("user-lon", 0, "user longitude; omit to use config or auto-detection")
 	if err := flags.Parse(args); err != nil {
 		return shared.ExecutionRequest{}, err
 	}
 
 	payloadValue, err := readPayload(*payload, *payloadFile)
+	if err != nil {
+		return shared.ExecutionRequest{}, err
+	}
+
+	location, err := ctl.ResolveLocation(ctx, cfg, *userLat, *userLon, flagWasPassed(flags, "user-lat"), flagWasPassed(flags, "user-lon"))
 	if err != nil {
 		return shared.ExecutionRequest{}, err
 	}
@@ -291,17 +308,11 @@ func parseExecutionFlags(args []string, cfg ctl.Config) (shared.ExecutionRequest
 		ModuleRegistryURL: strings.TrimSpace(*moduleRegistryURL),
 		ModuleDigest:      strings.TrimSpace(*moduleDigest),
 		Payload:           payloadValue,
-		UserLat:           *userLat,
-		UserLon:           *userLon,
+		UserLat:           location.Latitude,
+		UserLon:           location.Longitude,
 	}
 	if err := req.Validate(); err != nil {
 		return shared.ExecutionRequest{}, err
-	}
-	if req.UserLat < -90 || req.UserLat > 90 {
-		return shared.ExecutionRequest{}, fmt.Errorf("user-lat must be between -90 and 90")
-	}
-	if req.UserLon < -180 || req.UserLon > 180 {
-		return shared.ExecutionRequest{}, fmt.Errorf("user-lon must be between -180 and 180")
 	}
 
 	return req, nil
@@ -314,7 +325,7 @@ func runJobs(ctx context.Context, client *ctl.Client, output string, args []stri
 
 	switch args[0] {
 	case "create":
-		req, err := parseExecutionFlags(args[1:], client.Config)
+		req, err := parseExecutionFlags(ctx, args[1:], client.Config)
 		if err != nil {
 			return err
 		}
@@ -373,7 +384,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, `wasmcatctl controls a wasmCat master over mTLS.
 
 Usage:
-  wasmcatctl config init [--master URL] [--ca PATH] [--cert PATH] [--key PATH]
+  wasmcatctl config init [--master URL] [--ca PATH] [--cert PATH] [--key PATH] [--auto-location=true]
   wasmcatctl config view
   wasmcatctl [global flags] health
   wasmcatctl [global flags] ready
@@ -392,6 +403,10 @@ Global flags:
   --key PATH      override client_key
   -o, --output    table or json
   --timeout       request timeout, default 30s
+
+Execution location:
+  execute and jobs create use --user-lat/--user-lon when provided, then saved
+  default coordinates, then auto-detection from the configured location provider.
 
 `, configPath)
 }

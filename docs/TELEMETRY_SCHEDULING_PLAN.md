@@ -6,7 +6,7 @@ wasmCat already has native installation, mTLS communication, worker registration
 
 This plan adds two production inputs to scheduling:
 
-- configured worker location
+- resolved worker location
 - live worker capacity from heartbeat telemetry
 
 ## Design Goals
@@ -19,14 +19,21 @@ This plan adds two production inputs to scheduling:
 
 ## Worker Location
 
-Workers now expose static location through:
+Workers resolve their location during startup. Explicit coordinates are supported through:
 
 ```text
 WORKER_LATITUDE
 WORKER_LONGITUDE
 ```
 
-These values are sent in the worker registration payload. The master stores them in the registry and uses them for Haversine distance calculation.
+When these values are absent, the worker uses:
+
+```text
+WORKER_AUTO_DETECT_LOCATION=true
+WORKER_LOCATION_PROVIDER_URL=https://ipapi.co/json/
+```
+
+The worker queries the provider, stores the detected coordinates in memory, and sends them in the registration payload. The master stores them in the registry and uses them for Haversine distance calculation.
 
 Latitude must be between `-90` and `90`. Longitude must be between `-180` and `180`. Invalid values fail during config loading or `wasmcat-worker init`.
 
@@ -84,6 +91,6 @@ The dispatcher bubbles that up as a dispatch failure, and the master returns a `
 ## Operational Guidance
 
 - Start with conservative thresholds such as `MIN_WORKER_CPU_FREE=10` and `MIN_WORKER_RAM_FREE_MB=256`.
-- Set worker coordinates explicitly; leaving both at zero makes every unset worker appear near the Gulf of Guinea.
+- Keep auto-location enabled for cloud VMs, or set worker coordinates explicitly when public-IP geolocation is inaccurate.
 - Keep `WORKER_ADVERTISE_ADDRESS` reachable from the master; location only affects selection, not connectivity.
 - Monitor heartbeat logs after rollout because missing certs or unreachable master URLs stop telemetry before metrics are sent.
