@@ -1,0 +1,21 @@
+[Unit]
+Description=wasmCat worker node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wasmcat
+Group=wasmcat
+EnvironmentFile=/etc/wasmcat/worker.env
+ExecStart=/usr/local/bin/wasmcat-worker
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/wasmcat
+
+[Install]
+WantedBy=multi-user.target

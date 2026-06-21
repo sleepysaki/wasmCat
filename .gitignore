@@ -11,6 +11,9 @@
 # Test binary, built with `go test -c`
 *.test
 
+# Git
+.git
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
@@ -30,3 +33,10 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+til/
+modules/
+test_modules/
+.gocache
+.gomodcache
+dist/
