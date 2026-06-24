@@ -2,6 +2,8 @@
 
 This guide deploys wasmCat as native Go binaries on Ubuntu 24.04 VMs. wasmCat does not require Docker, containerd, Kubernetes, or any sidecar runtime. The master runs the control plane, SQLite job state, ACR manifest resolution, and geo-aware scheduling. Workers fetch `.wasm` bytes directly into memory and execute them with the embedded wazero runtime.
 
+If a node does not register during setup, use [NODE_SETUP_TROUBLESHOOTING.md](NODE_SETUP_TROUBLESHOOTING.md). It records real VM setup failures, including `localhost` master URLs, CA fingerprint mismatches, certificate SAN issues, SSH copy failures, and geolocation rate limits.
+
 ## 1. VM Specifications & Installation Guide
 
 ### Recommended VM Sizes
@@ -499,3 +501,5 @@ wasmcatctl ready
 ```
 
 If workers do not appear, check the worker certificate name, `WORKER_ID`, `MASTER_URL`, firewall access to `7270`, and whether `WORKER_ADVERTISE_ADDRESS` is reachable from the master.
+
+For exact symptoms and fixes, see [NODE_SETUP_TROUBLESHOOTING.md](NODE_SETUP_TROUBLESHOOTING.md).

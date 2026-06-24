@@ -40,3 +40,8 @@ test_modules/
 .gocache
 .gomodcache
 dist/
+
+# wasmCat local runtime material
+run/
+local/certs/
+*.key
