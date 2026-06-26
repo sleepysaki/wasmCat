@@ -17,7 +17,7 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Dependency injection:** `Gateway`, `Dispatcher`, and `WorkerServer` receive dependencies as struct fields, which also makes handler tests possible.
 - **In-memory registry/cache:** Worker state is held in `Registry.workers`; compiled modules are held in `WasmEngine.cache`. Execution jobs are persisted in SQLite when the master runs with a `JobStore`.
 - **Event-loop background tasks:** Master cleanup and worker telemetry run on tickers controlled by cancellation contexts.
-- **Native release packaging:** `scripts/build.*`, systemd templates, and GitHub release workflow distribute master, worker, `wasmcatctl`, and service files.
+- **Native release packaging:** `scripts/build.*`, systemd templates, and GitHub release workflow distribute master, worker, `wasmcatctl`, `wasmcat-ui`, and service files.
 
 ### Control Flow
 
@@ -55,6 +55,15 @@ The core responsibility is to execute WASM modules on registered workers without
 4. Execution commands call `internal/ctl.ResolveLocation` before contacting the master. The resolver uses explicit `--user-lat/--user-lon` values first, saved fallback coordinates second, and IP-based auto-detection through `location_provider_url` last.
 5. `internal/ctl.NewClient` creates an mTLS HTTP client using the configured CA, client certificate, and private key.
 6. The command calls the master API and prints table-style output for humans or JSON for automation.
+
+#### wasmcat-ui dashboard lifecycle
+
+1. `cmd/wasmcat-ui/main.go` starts a local HTTP dashboard server, usually on `:7280`.
+2. `internal/ui.Server` serves embedded HTML, CSS, and JavaScript assets from `internal/ui/static`.
+3. The browser calls `/ui/api/*` endpoints on the dashboard backend.
+4. The dashboard backend loads the same `~/.wasmcat/config.json` file used by `wasmcatctl`.
+5. The backend creates an mTLS `internal/ctl.Client` and forwards dashboard actions to the master API.
+6. The browser receives JSON responses from the backend without needing direct access to client certificate private keys.
 
 #### Execution request lifecycle
 
@@ -114,6 +123,18 @@ The core responsibility is to execute WASM modules on registered workers without
 - **Name & Responsibility:** Shared implementation for the `wasmcatctl` binary.
 - **State & Properties:** `Config` stores master URL, certificate paths, optional fallback user coordinates, auto-location settings, and output mode. `Client` stores this config and an HTTP client. `Location` stores the resolved latitude, longitude, and source used for one execution request.
 - **Interactions:** Reuses `internal/security.NewMTLSHTTPClient`, `internal/shared` models, and master endpoints such as `/api/v1/execute`, `/api/v1/jobs`, `/api/v1/workers`, and `/internal/drain`.
+
+### `cmd/wasmcat-ui/main.go`
+
+- **Name & Responsibility:** Browser dashboard entrypoint. Starts an operator-facing HTTP server for inspecting and controlling the cluster.
+- **State & Properties:** Parses listen address, config path, API timeout, and version flag. Owns only the dashboard server lifecycle, not cluster state.
+- **Interactions:** Constructs `internal/ui.Server`, wraps it in the shared HTTP server timeout policy, and shuts it down on `SIGINT` or `SIGTERM`.
+
+### `internal/ui`
+
+- **Name & Responsibility:** Dashboard backend and embedded static web application.
+- **State & Properties:** `Server` stores optional config path, master API timeout, and optional test client factory. Embedded assets include `index.html`, `app.css`, and `app.js`.
+- **Interactions:** Serves `/`, `/app.css`, and `/app.js`; exposes `/ui/api/config`, `/ui/api/health`, `/ui/api/ready`, `/ui/api/metrics`, `/ui/api/workers`, `/ui/api/workers/{worker_id}/drain`, `/ui/api/execute`, `/ui/api/jobs`, and `/ui/api/jobs/{request_id}`. It uses `internal/ctl` so dashboard behavior matches CLI behavior.
 
 ### `internal/bootstrap/bootstrap.go`
 
@@ -267,7 +288,7 @@ The core responsibility is to execute WASM modules on registered workers without
 
 ### Packaging, CI, and release files
 
-- **`scripts/build.sh` / `scripts/build.ps1`:** Cross-compile native master, worker, and `wasmcatctl` binaries, copy systemd/env templates, and write `checksums.txt`.
+- **`scripts/build.sh` / `scripts/build.ps1`:** Cross-compile native master, worker, `wasmcatctl`, and `wasmcat-ui` binaries, copy systemd/env templates, and write `checksums.txt`.
 - **`.github/workflows/ci.yml`:** Pull request and main branch quality gates.
 - **`.github/workflows/release.yml`:** Tag-triggered native release publishing.
 - **`packaging/systemd/*`:** Service and env templates for Linux hosts.
