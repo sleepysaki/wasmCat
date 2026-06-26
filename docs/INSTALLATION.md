@@ -21,6 +21,8 @@ The initialization design is documented in [BOOTSTRAP_PLAN.md](BOOTSTRAP_PLAN.md
 
 The release process is documented in [RELEASE_PLAN.md](RELEASE_PLAN.md). Tagged releases publish binaries, service templates, env templates, and checksums.
 
+Setup failure patterns from real VM deployments are recorded in [NODE_SETUP_TROUBLESHOOTING.md](NODE_SETUP_TROUBLESHOOTING.md). Check it when a worker service is running but does not appear in `wasmcatctl workers`.
+
 ## Install From A Release
 
 Set the repository and release version:
