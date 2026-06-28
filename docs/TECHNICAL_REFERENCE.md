@@ -1329,7 +1329,10 @@ Wrong methods return JSON error code `method_not_allowed` and an `Allow` header 
 
 ### WASM Module ABI
 
-Each WASM module must export:
+The worker supports two execution modes, selected by the request `abi` field
+(`""` auto-detect, `"wasmcat"`, or `"wasi"`).
+
+**Custom wasmCat ABI (`wasmcat`).** A lightweight ABI for purpose-built modules. The module must export:
 
 ```text
 memory
@@ -1343,6 +1346,10 @@ The host writes the request payload into module memory at the pointer returned b
 output_ptr = uint32(result >> 32)
 output_len = uint32(result)
 ```
+
+**WASI (`wasi`).** Standard `wasip1` command modules compiled from Rust, Go, TinyGo, C, and similar toolchains. The module exports `_start`; the worker delivers the request payload on **stdin** and reads the result from **stdout**. The worker instantiates the `wasi_snapshot_preview1` host (via wazero), enforces the output-size limit against stdout, and treats a WASI exit code of `0` as success.
+
+**Auto-detection.** When `abi` is empty, the worker inspects the compiled module's exports: a module exporting `run` uses the wasmCat ABI; a module exporting `_start` uses WASI. Each request still gets a fresh module instance with its own linear memory, and the digest-aware compiled-module cache is shared across both modes.
 
 ## 5. Deployment & Operational Considerations
 
@@ -1397,7 +1404,7 @@ output_len = uint32(result)
 - **Some state remains process-local:** Registry and module cache are in memory. Master restart loses worker registry; worker restart loses compiled module cache. Multiple master instances still need a shared backend or leader protocol before active-active HA is safe.
 - **Execution authorization allowlist is optional:** If `EXECUTE_CLIENT_ALLOWLIST` is empty, any valid client certificate trusted by the CA can call `/api/v1/execute`, `/api/v1/jobs`, and `/api/v1/jobs/{request_id}`.
 - **Module source policy is optional:** If `MODULE_HOST_ALLOWLIST` is empty and `REQUIRE_MODULE_DIGEST=false`, trusted execution clients can submit any HTTP(S) module URL.
-- **WASM ABI is narrow:** Modules must match the exact `memory`, `malloc`, and packed `run` ABI. WASI modules or modules with different host imports are not supported by the current engine path.
+- **Two ABI modes:** Modules either follow the custom `memory`/`malloc`/`run` ABI or are standard `wasip1` WASI command modules (stdin/stdout). Modules with other host imports beyond `wasi_snapshot_preview1` are not supported by the current engine path.
 
 ### Operational Recommendations
 

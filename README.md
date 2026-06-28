@@ -22,3 +22,5 @@ Use [docs/NODE_SETUP_TROUBLESHOOTING.md](docs/NODE_SETUP_TROUBLESHOOTING.md) whe
 Use [docs/WASMCATCTL.md](docs/WASMCATCTL.md) for `wasmcatctl` commands that replace long mTLS `curl` calls during operation.
 
 Use [docs/WEB_DASHBOARD.md](docs/WEB_DASHBOARD.md) for the browser-based `wasmcat-ui` operator console.
+
+Use [docs/DEMO.md](docs/DEMO.md) to demonstrate the system end to end. `sh scripts/demo.sh` builds the binaries and verifies every core capability (setup, registration, geo-aware distribution and execution, durable jobs, drain, mTLS) with a requirement-by-requirement result map.

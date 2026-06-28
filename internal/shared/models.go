@@ -14,6 +14,21 @@ const (
 	RequestIDMaxLength  = 128
 )
 
+// Module ABI modes select how the worker hands input to a module and reads its
+// output. The default keeps the lightweight custom wasmCat ABI; WASI lets the
+// worker run standard production modules compiled for wasip1.
+const (
+	// ModuleABIAuto detects the mode from the module's exports: a module that
+	// exports run uses the wasmCat ABI; a module that exports _start uses WASI.
+	ModuleABIAuto = ""
+	// ModuleABIWasmcat is the custom ABI: exports memory, malloc, run; input is
+	// written into linear memory and run returns a packed pointer/length uint64.
+	ModuleABIWasmcat = "wasmcat"
+	// ModuleABIWASI runs a wasip1 command module: the payload is delivered on
+	// stdin and the result is read from stdout.
+	ModuleABIWASI = "wasi"
+)
+
 // Master node stores these in State Registry
 type WorkerNode struct {
 	ID        string    `json:"id"`
@@ -97,6 +112,10 @@ type ExecutionRequest struct {
 	ModuleDigest      string `json:"module_digest,omitempty"`
 	JITBearerToken    string `json:"jit_bearer_token,omitempty"`
 
+	// ModuleABI selects the execution mode: "" (auto-detect), "wasmcat" (custom
+	// ABI), or "wasi" (wasip1 stdin/stdout). Empty preserves prior behavior.
+	ModuleABI string `json:"abi,omitempty"`
+
 	// User's location to run Haversine formula
 	// "omitempty" means if the Master forwards this to the Worker, it can drop these
 	// fields to save bandwidth, since the Worker doesn't care about GPS.
@@ -113,6 +132,11 @@ func (r ExecutionRequest) Validate() error {
 	}
 	if r.ModuleURL == "" && r.ModuleRegistryURL == "" {
 		return fmt.Errorf("module_url or module_registry_url is required")
+	}
+	switch r.ModuleABI {
+	case ModuleABIAuto, ModuleABIWasmcat, ModuleABIWASI:
+	default:
+		return fmt.Errorf("abi must be one of %q, %q, or empty", ModuleABIWasmcat, ModuleABIWASI)
 	}
 
 	return nil

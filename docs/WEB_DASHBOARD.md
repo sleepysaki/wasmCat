@@ -74,7 +74,7 @@ Drain calls the operator endpoint `POST /api/v1/workers/{id}/drain`. If the mast
 
 ### Execute
 
-Runs `POST /api/v1/execute` through the UI backend. It supports direct module URLs and Azure ACR registry URLs.
+Runs `POST /api/v1/execute` through the UI backend. It supports direct module URLs and Azure ACR registry URLs, and an ABI selector (auto-detect / `wasmcat` / `wasi`) so you can run both custom-ABI modules and standard `wasip1` WASI modules.
 
 ### Jobs
 

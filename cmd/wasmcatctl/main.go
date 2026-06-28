@@ -283,6 +283,7 @@ func parseExecutionFlags(ctx context.Context, args []string, cfg ctl.Config) (sh
 	moduleURL := flags.String("url", "", "direct WASM module URL")
 	moduleRegistryURL := flags.String("registry-url", "", "ACR module registry URL")
 	moduleDigest := flags.String("digest", "", "expected module digest, for example sha256:<hex>")
+	abi := flags.String("abi", "", "module ABI: wasmcat, wasi, or empty to auto-detect")
 	payload := flags.String("payload", "", "payload string")
 	payloadFile := flags.String("payload-file", "", "file containing payload string")
 	userLat := flags.Float64("user-lat", 0, "user latitude; omit to use config or auto-detection")
@@ -307,6 +308,7 @@ func parseExecutionFlags(ctx context.Context, args []string, cfg ctl.Config) (sh
 		ModuleURL:         strings.TrimSpace(*moduleURL),
 		ModuleRegistryURL: strings.TrimSpace(*moduleRegistryURL),
 		ModuleDigest:      strings.TrimSpace(*moduleDigest),
+		ModuleABI:         strings.TrimSpace(*abi),
 		Payload:           payloadValue,
 		UserLat:           location.Latitude,
 		UserLon:           location.Longitude,
@@ -390,8 +392,8 @@ Usage:
   wasmcatctl [global flags] ready
   wasmcatctl [global flags] metrics
   wasmcatctl [global flags] workers
-  wasmcatctl [global flags] execute --module NAME (--url URL | --registry-url URL) --payload TEXT
-  wasmcatctl [global flags] jobs create --module NAME (--url URL | --registry-url URL) --payload TEXT
+  wasmcatctl [global flags] execute --module NAME (--url URL | --registry-url URL) --payload TEXT [--abi wasi]
+  wasmcatctl [global flags] jobs create --module NAME (--url URL | --registry-url URL) --payload TEXT [--abi wasi]
   wasmcatctl [global flags] jobs get REQUEST_ID
   wasmcatctl [global flags] drain WORKER_ID
 

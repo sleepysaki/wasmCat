@@ -301,6 +301,7 @@ function executionRequestFromForm() {
     module_url: data.get("module_url").trim(),
     module_registry_url: data.get("module_registry_url").trim(),
     module_digest: data.get("module_digest").trim(),
+    abi: data.get("abi") || "",
     user_lat: numberOrZero(data.get("user_lat")),
     user_lon: numberOrZero(data.get("user_lon")),
     payload: data.get("payload") || "",

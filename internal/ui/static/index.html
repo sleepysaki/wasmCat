@@ -116,6 +116,14 @@
             <input name="module_digest" placeholder="sha256:&lt;digest&gt;" />
           </label>
           <label>
+            ABI
+            <select name="abi">
+              <option value="">auto-detect</option>
+              <option value="wasmcat">wasmcat (memory/malloc/run)</option>
+              <option value="wasi">wasi (stdin/stdout)</option>
+            </select>
+          </label>
+          <label>
             User latitude
             <input name="user_lat" type="number" step="any" />
           </label>

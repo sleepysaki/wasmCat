@@ -132,6 +132,22 @@ go run ./cmd/wasmcatctl execute `
   --payload-file .\payload.json
 ```
 
+### Execution ABI
+
+Use `--abi` to choose the execution mode. It applies to both `execute` and `jobs create`:
+
+- `--abi wasi` for a standard `wasip1` module (payload on stdin, result on stdout), the recommended mode for production code built with Rust, Go, TinyGo, or C.
+- `--abi wasmcat` for a custom-ABI module (`memory`/`malloc`/`run`).
+- omit `--abi` to auto-detect from the module's exports (`run` -> wasmcat, `_start` -> wasi).
+
+```powershell
+go run ./cmd/wasmcatctl execute `
+  --module add `
+  --url https://example.com/modules/add-wasi.wasm `
+  --abi wasi `
+  --payload "2,3"
+```
+
 ## Durable Jobs
 
 Create an asynchronous durable job:

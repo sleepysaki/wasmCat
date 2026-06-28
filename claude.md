@@ -199,7 +199,9 @@ Execution path:
 
 #### WASM ABI
 
-The current worker expects a custom wasmCat ABI, not arbitrary WASI/browser Wasm:
+The worker supports two execution modes, selected by the request `abi` field (`""` auto-detect, `"wasmcat"`, or `"wasi"`).
+
+The custom wasmCat ABI expects:
 
 ```text
 memory
@@ -214,7 +216,9 @@ high 32 bits = output pointer
 low 32 bits  = output length
 ```
 
-The host writes input bytes into module memory at the pointer returned by `malloc`, calls `run`, then reads output bytes from module memory. This keeps execution lightweight and deterministic, but it means modules must be built specifically for wasmCat's ABI until optional WASI support is added.
+The host writes input bytes into module memory at the pointer returned by `malloc`, calls `run`, then reads output bytes from module memory. This keeps execution lightweight and deterministic.
+
+The WASI mode runs standard `wasip1` command modules (Rust, Go, TinyGo, C, etc.): the worker instantiates `wasi_snapshot_preview1` (via wazero), delivers the payload on stdin, and reads the result from stdout (exit code 0 = success). When `abi` is empty the worker auto-detects: a module exporting `run` uses the wasmCat ABI; a module exporting `_start` uses WASI. Both modes share the same digest-aware compiled-module cache and per-request instance isolation.
 
 #### Limits and Cache Lifecycle
 
@@ -321,6 +325,7 @@ This path is more reliable under restarts or unstable clients because the reques
 - `scripts/gen-certs.sh` generates a consistent mTLS bundle from one CA (master/worker/operator) with correct SANs, `serverAuth`/`clientAuth`, and `worker-<WORKER_ID>` filenames; the CA private key stays in a separate PKI directory, never on a node. Prevents the common CA-mismatch / missing-clientAuth / missing-IP-SAN / wrong-filename failures.
 - `scripts/build.sh` validates the local Go toolchain against `go.mod` and fails early with a clear message instead of the confusing `invalid go version` error.
 - Worker auto-location accepts a comma-separated `WORKER_LOCATION_PROVIDER_URL` and falls back across providers (default `https://ipapi.co/json/,https://ipinfo.io/json`); `wasmcat-worker init` warns when `MASTER_URL`/`WORKER_ADVERTISE_ADDRESS` use a loopback host.
+- Optional WASI execution mode beside the custom ABI: requests carry an `abi` field (`""` auto-detect, `wasmcat`, `wasi`); `wasmcatctl execute/jobs create --abi` and the dashboard ABI selector expose it. Standard `wasip1` modules run via stdin/stdout using wazero's `wasi_snapshot_preview1`.
 - Separate `tests/` tree covering unit, integration, and smoke tests.
 - Production VM deployment docs, node setup troubleshooting, ACR usage docs, and WABT-to-ACR module pipeline docs.
 - GitHub workflow to publish WABT `.wat` modules as `.wasm` OCI artifacts to ACR.
@@ -343,7 +348,7 @@ Do not assume these files have been committed unless `git status` confirms it.
 2. Run the full real-environment ACR execution path: GitHub workflow -> ACR artifact -> master manifest resolution -> worker JIT fetch -> wazero result.
 3. Add measured latency tables for direct URL cold/warm cache and ACR cold/warm cache.
 4. Add a small module SDK/template so developers can write production logic without hand-writing WAT.
-5. Decide whether to add optional WASI support as a separate execution mode. Current ABI-only execution is lightweight but limits module compatibility.
+5. WASI support is implemented as an optional execution mode beside the custom ABI (request `abi=wasi`, or auto-detected from `_start`). Next: broaden compatibility for modules needing host imports beyond `wasi_snapshot_preview1`, and add WASI filesystem/env policy if required.
 6. Improve production HA beyond local SQLite: external replicated database, leader election, or single-master failover strategy.
 7. Extend scheduling with measured RTT, queue depth, cache locality, and historical execution time.
 8. Strengthen resource isolation with fuel metering, memory caps, cgroups, or process-level sandboxing.
@@ -356,7 +361,7 @@ Do not assume these files have been committed unless `git status` confirms it.
 - Worker registry is in-memory and reconstructed from registration/heartbeat traffic.
 - Haversine distance is a geographic approximation, not real network latency.
 - Host-level CPU/RAM telemetry is not the same as per-invocation cgroup isolation.
-- Current ABI requires `memory`, `malloc`, and `run`; arbitrary WASI/browser modules do not run unchanged.
+- Execution supports the custom `memory`/`malloc`/`run` ABI and standard `wasip1` WASI modules (stdin/stdout); modules needing host imports beyond `wasi_snapshot_preview1` still do not run unchanged.
 - ACR token cache is process-local.
 - Public IP geolocation providers can rate-limit or report inaccurate coordinates; production should prefer cloud metadata or internal region mapping.
 
