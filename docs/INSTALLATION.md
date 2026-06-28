@@ -375,9 +375,67 @@ go run ./cmd/worker
 
 This mode is for development only. Production should provide certificates through a controlled secret or configuration process and set `AUTO_GENERATE_CERTS=false`.
 
-## Upgrade
+## Install or Update With the Script
 
-Build or download the new release, replace the binary, and restart the service:
+`scripts/install-or-update.sh` automates first-time installs and in-place updates so you do not have to repeat the manual `install`/`restart` steps after every code change. It is safe to re-run.
+
+What it does for each selected component:
+
+- backs up the current binary as `<binary>.bak` before replacing it,
+- installs the new binary into `/usr/local/bin`,
+- shows the installed version and the new version,
+- restarts only the relevant systemd service (`wasmcat-master` or `wasmcat-worker`),
+- automatically rolls that component back to `.bak` if the service fails to come back active.
+
+It never touches the config directory, so `/etc/wasmcat/*.env`, `/etc/wasmcat/certs`, and the SQLite job database are preserved across updates.
+
+Build (or download) the binaries first, then run the script for the host role:
+
+```bash
+# Build artifacts into ./dist on a build machine, then copy the repo or dist/ to the VM.
+sh scripts/build.sh
+
+# Master VM:
+sudo sh scripts/install-or-update.sh --role master --source ./dist
+
+# Worker VM:
+sudo sh scripts/install-or-update.sh --role worker --source ./dist
+
+# Operator machine (no systemd services involved):
+sh scripts/install-or-update.sh --role ctl,ui --source ./dist --bin-dir "$HOME/.local/bin"
+```
+
+Install directly from a tagged GitHub release instead of a local `dist/` (checksums are verified when published):
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --version v0.1.0 --repo <owner>/<repo>
+```
+
+First-time install on a fresh VM can also drop the systemd unit file from the artifacts:
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --source ./dist --install-service
+# then provide /etc/wasmcat config + certs (see below) and:
+sudo systemctl enable --now wasmcat-master
+```
+
+Roll a bad update back to the previous binary and restart the service:
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --rollback
+```
+
+Preview every action without changing anything:
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --source ./dist --dry-run
+```
+
+Run `sh scripts/install-or-update.sh --help` for the full option list.
+
+## Manual Upgrade
+
+The script is preferred, but the manual path still works. Build or download the new release, replace the binary, and restart the service:
 
 ```bash
 sudo install -m 0755 wasmcat-master-linux-amd64 /usr/local/bin/wasmcat-master
@@ -392,3 +450,16 @@ sudo systemctl restart wasmcat-worker
 ```
 
 Keep `/etc/wasmcat/*.env` and `/etc/wasmcat/certs` outside the release artifact so upgrades do not overwrite host configuration or secrets.
+
+## Check Installed Versions
+
+Each binary reports its build version, which the update script uses to show before/after versions:
+
+```bash
+wasmcat-master version
+wasmcat-worker version
+wasmcatctl version
+wasmcat-ui --version
+```
+
+A plain `go build`/`go run` reports `dev`; release builds report the tag passed through `VERSION=...`.

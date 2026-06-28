@@ -204,6 +204,34 @@ journalctl -u wasmcat-master -f
 journalctl -u wasmcat-worker -f
 ```
 
+### Updating an Existing Deployment
+
+After the first deployment, use `scripts/install-or-update.sh` instead of repeating the manual `install`/`restart` steps. It backs up the current binary as `<binary>.bak`, installs the new one, restarts only the matching service, and rolls back automatically if the service does not return to active. It never modifies `/etc/wasmcat`, so env files, certificates, and the SQLite job database survive the update.
+
+Build the new binaries on the build machine and copy the repository (or just `dist/` plus the script) to the VM, then:
+
+```bash
+# On the master VM:
+sudo sh scripts/install-or-update.sh --role master --source ./dist
+
+# On each worker VM:
+sudo sh scripts/install-or-update.sh --role worker --source ./dist
+```
+
+Or update straight from a tagged GitHub release (checksums verified when published):
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --version v0.1.0 --repo <your-org>/wasmCat
+```
+
+If an update misbehaves, roll the previous binary back and restart the service:
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --rollback
+```
+
+See [INSTALLATION.md](INSTALLATION.md#install-or-update-with-the-script) for the full option list.
+
 ## 2. Code-to-Node Pipeline
 
 ### WASM ABI Required by wasmCat

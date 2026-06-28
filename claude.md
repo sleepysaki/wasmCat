@@ -316,6 +316,8 @@ This path is more reliable under restarts or unstable clients because the reques
 - Worker job completion callback to `POST /internal/jobs/complete`.
 - Durable job recovery loop with conservative ambiguity handling.
 - Worker draining endpoint and state.
+- `version` subcommand on all four binaries (`wasmcat-master version`, `wasmcat-worker version`, `wasmcatctl version`, `wasmcat-ui --version`); the build-time `-X main.version` ldflag now applies to every binary.
+- `scripts/install-or-update.sh` for first-time install and idempotent in-place updates: backs up the prior binary as `.bak`, shows installed-vs-new versions, restarts only the matching systemd service, auto-rolls-back on a failed restart, supports `--rollback`/`--dry-run`/`--install-service` and downloading a tagged release, and never modifies `/etc/wasmcat` (env, certs, SQLite DB preserved).
 - Separate `tests/` tree covering unit, integration, and smoke tests.
 - Production VM deployment docs, node setup troubleshooting, ACR usage docs, and WABT-to-ACR module pipeline docs.
 - GitHub workflow to publish WABT `.wat` modules as `.wasm` OCI artifacts to ACR.
