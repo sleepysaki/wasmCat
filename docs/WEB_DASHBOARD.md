@@ -62,11 +62,15 @@ The dashboard can perform the current `wasmcatctl` action set:
 
 ### Dashboard
 
-Shows master health, readiness, active worker count, dispatch success count, and the latest refresh status.
+Shows master health, readiness, active worker count, dispatch success count, and the latest refresh status. The tiles load independently: if one endpoint is unavailable or gated (for example worker listing under an execute-client allowlist), that tile shows `error` and the others still render. The connection badge reads `Connected`, `Degraded` (some calls failed), or `Disconnected` (all calls failed).
+
+Use the **Auto-refresh** toggle in the top bar to poll the live views (dashboard, workers, metrics) every 5 seconds. It does not poll the Execute, Jobs, or Settings forms so it never clears input.
 
 ### Workers
 
-Lists registered workers with address, state, CPU/RAM availability, location, last heartbeat age, and a drain action.
+Lists registered workers with address, state, CPU/RAM availability, location, last heartbeat age, and a drain action. A worker already in the `draining` state shows a disabled button instead of a drain action.
+
+Drain calls the operator endpoint `POST /api/v1/workers/{id}/drain`. If the master has `EXECUTE_CLIENT_ALLOWLIST` set, the UI `client_cert` identity must be in that allowlist or drain (and worker listing) return `403 execute_client_unauthorized`. See [EXECUTION_AUTHORIZATION.md](EXECUTION_AUTHORIZATION.md).
 
 ### Execute
 

@@ -1,7 +1,13 @@
 const state = {
   config: null,
   currentView: "dashboard",
+  autoRefresh: false,
+  autoTimer: null,
 };
+
+const AUTO_REFRESH_MS = 5000;
+// Views that show live cluster state and are safe to poll without disturbing input.
+const LIVE_VIEWS = new Set(["dashboard", "workers", "metrics"]);
 
 const titles = {
   dashboard: ["Dashboard", "Cluster readiness, workers, and execution activity."],
@@ -29,6 +35,7 @@ function bindNavigation() {
 
 function bindActions() {
   document.getElementById("refresh-btn").addEventListener("click", refreshCurrentView);
+  document.getElementById("autorefresh-btn").addEventListener("click", toggleAutoRefresh);
   document.getElementById("workers-refresh").addEventListener("click", loadWorkers);
   document.getElementById("metrics-refresh").addEventListener("click", loadMetrics);
   document.getElementById("execute-form").addEventListener("submit", executeNow);
@@ -50,6 +57,27 @@ function setView(view) {
   refreshCurrentView();
 }
 
+function toggleAutoRefresh() {
+  state.autoRefresh = !state.autoRefresh;
+  const button = document.getElementById("autorefresh-btn");
+  button.textContent = `Auto-refresh: ${state.autoRefresh ? "On" : "Off"}`;
+  button.setAttribute("aria-pressed", String(state.autoRefresh));
+  button.classList.toggle("primary", state.autoRefresh);
+  button.classList.toggle("secondary", !state.autoRefresh);
+
+  if (state.autoTimer) {
+    window.clearInterval(state.autoTimer);
+    state.autoTimer = null;
+  }
+  if (state.autoRefresh) {
+    state.autoTimer = window.setInterval(() => {
+      if (LIVE_VIEWS.has(state.currentView)) {
+        refreshCurrentView();
+      }
+    }, AUTO_REFRESH_MS);
+  }
+}
+
 async function refreshCurrentView() {
   if (state.currentView === "dashboard") {
     await loadDashboard();
@@ -69,29 +97,40 @@ async function loadDashboard() {
   const dispatchValue = document.getElementById("dispatch-success-value");
   const message = document.getElementById("dashboard-message");
 
-  try {
-    const [health, ready, metrics, workers] = await Promise.all([
-      apiGet("/ui/api/health"),
-      apiGet("/ui/api/ready"),
-      apiGet("/ui/api/metrics"),
-      apiGet("/ui/api/workers"),
-    ]);
+  // Use allSettled so a single gated endpoint (for example /api/v1/workers when
+  // an execute-client allowlist is configured) does not blank the whole view.
+  const [health, ready, metrics, workers] = await Promise.allSettled([
+    apiGet("/ui/api/health"),
+    apiGet("/ui/api/ready"),
+    apiGet("/ui/api/metrics"),
+    apiGet("/ui/api/workers"),
+  ]);
 
-    healthValue.textContent = health.status || "-";
-    readyValue.textContent = ready.status || "-";
-    workersValue.textContent = String(workers.length);
-    dispatchValue.textContent = String(metrics.master?.dispatch_success ?? 0);
-    message.textContent = `Master role ${health.role || "unknown"} has ${metrics.requests_total ?? 0} observed HTTP requests.`;
-    document.getElementById("last-refresh").textContent = `Refreshed ${new Date().toLocaleTimeString()}`;
-    setConnection(true, "Connected");
-  } catch (error) {
-    setConnection(false, "Disconnected");
-    message.textContent = error.message;
-    healthValue.textContent = "-";
-    readyValue.textContent = "-";
-    workersValue.textContent = "-";
-    dispatchValue.textContent = "-";
+  healthValue.textContent = health.status === "fulfilled" ? health.value.status || "-" : "error";
+  readyValue.textContent = ready.status === "fulfilled" ? ready.value.status || "-" : "error";
+  workersValue.textContent = workers.status === "fulfilled" ? String(workers.value.length) : "error";
+  dispatchValue.textContent =
+    metrics.status === "fulfilled" ? String(metrics.value.master?.dispatch_success ?? 0) : "error";
+
+  const errors = [];
+  if (health.status === "rejected") errors.push(`health: ${health.reason.message}`);
+  if (ready.status === "rejected") errors.push(`ready: ${ready.reason.message}`);
+  if (metrics.status === "rejected") errors.push(`metrics: ${metrics.reason.message}`);
+  if (workers.status === "rejected") errors.push(`workers: ${workers.reason.message}`);
+
+  if (errors.length === 0) {
+    const role = health.value.role || "unknown";
+    const requests = metrics.value.requests_total ?? 0;
+    message.textContent = `Master role ${role} has ${requests} observed HTTP requests.`;
+    setConnection("ok", "Connected");
+  } else if (errors.length === 4) {
+    message.textContent = errors[0];
+    setConnection("bad", "Disconnected");
+  } else {
+    message.textContent = `Partial cluster state. ${errors.join(" | ")}`;
+    setConnection("warn", "Degraded");
   }
+  document.getElementById("last-refresh").textContent = `Refreshed ${new Date().toLocaleTimeString()}`;
 }
 
 async function loadWorkers() {
@@ -106,18 +145,26 @@ async function loadWorkers() {
 
     tbody.innerHTML = "";
     for (const worker of workers) {
+      const state = worker.state || "ready";
+      const draining = state === "draining";
+      const stateBadge = `<span class="pill ${draining ? "pill-warn" : "pill-ok"}">${escapeHTML(state)}</span>`;
+      const action = draining
+        ? `<button class="button secondary" disabled>Draining</button>`
+        : `<button class="button danger" data-worker="${escapeAttr(worker.id)}">Drain</button>`;
       const row = document.createElement("tr");
       row.innerHTML = `
         <td>${escapeHTML(worker.id)}</td>
         <td>${escapeHTML(worker.ip_address)}</td>
-        <td>${escapeHTML(worker.state || "ready")}</td>
+        <td>${stateBadge}</td>
         <td>${formatNumber(worker.cpu_free, 1)}%</td>
         <td>${formatNumber(worker.ram_free_mb, 0)} MB</td>
         <td>${formatNumber(worker.latitude, 4)}, ${formatNumber(worker.longitude, 4)}</td>
         <td>${formatAge(worker.last_seen)}</td>
-        <td><button class="button danger" data-worker="${escapeAttr(worker.id)}">Drain</button></td>
+        <td>${action}</td>
       `;
-      row.querySelector("button").addEventListener("click", () => drainWorker(worker.id));
+      if (!draining) {
+        row.querySelector("button").addEventListener("click", () => drainWorker(worker.id));
+      }
       tbody.appendChild(row);
     }
   } catch (error) {
@@ -316,10 +363,10 @@ async function api(path, options) {
   return payload;
 }
 
-function setConnection(ok, text) {
+function setConnection(level, text) {
   const badge = document.getElementById("connection-state");
   badge.textContent = text;
-  badge.className = `status ${ok ? "ok" : "bad"}`;
+  badge.className = `status ${level}`;
 }
 
 function showToast(message) {

@@ -92,7 +92,7 @@ func TestDashboardForwardsClusterOperations(t *testing.T) {
 			shared.WriteJSON(w, http.StatusAccepted, shared.JobResponse{RequestID: "req_job_1", Status: "queued"})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/jobs/req_job_1":
 			shared.WriteJSON(w, http.StatusOK, shared.JobResponse{RequestID: "req_job_1", Status: "succeeded"})
-		case r.Method == http.MethodPost && r.URL.Path == "/internal/drain":
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/workers/worker-vn-01/drain":
 			shared.WriteJSON(w, http.StatusOK, shared.APIResponse{Status: "success", Message: "Worker marked as draining"})
 		default:
 			t.Fatalf("unexpected master request %s %s", r.Method, r.URL.Path)

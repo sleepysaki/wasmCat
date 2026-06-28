@@ -193,6 +193,29 @@ h2 {
   color: var(--danger);
 }
 
+.status.warn {
+  background: #fef0c7;
+  color: var(--warning);
+}
+
+.pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pill-ok {
+  background: #dcfae6;
+  color: var(--ok);
+}
+
+.pill-warn {
+  background: #fef0c7;
+  color: var(--warning);
+}
+
 .view {
   display: none;
 }

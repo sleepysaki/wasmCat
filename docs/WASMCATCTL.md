@@ -160,6 +160,8 @@ go run ./cmd/wasmcatctl drain worker-vn-01
 
 After this, the scheduler excludes that worker from new executions while the worker remains visible in the registry.
 
+`drain` calls the operator endpoint `POST /api/v1/workers/{id}/drain`, which is authorized like the other `/api/v1` calls. If the master sets `EXECUTE_CLIENT_ALLOWLIST`, the identity in your configured `client_cert` must be listed, otherwise the call returns `403 execute_client_unauthorized`. This is separate from a worker draining itself on shutdown over `/internal/drain`.
+
 ## Output Formats
 
 The default output is table-oriented for humans. Use JSON when another tool needs to parse the response:
