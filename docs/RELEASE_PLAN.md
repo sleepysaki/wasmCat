@@ -39,9 +39,11 @@ Each release publishes:
 wasmcat-master-linux-amd64
 wasmcat-worker-linux-amd64
 wasmcatctl-linux-amd64
+wasmcat-ui-linux-amd64
 wasmcat-master-windows-amd64.exe
 wasmcat-worker-windows-amd64.exe
 wasmcatctl-windows-amd64.exe
+wasmcat-ui-windows-amd64.exe
 wasmcat-master.service
 wasmcat-worker.service
 wasmcat-master.env
@@ -60,6 +62,7 @@ download release assets
 verify checksums
 install master or worker binary
 install wasmcatctl for operator commands
+install wasmcat-ui for the browser dashboard
 run init
 provide certificates
 install service file

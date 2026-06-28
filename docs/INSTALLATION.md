@@ -10,6 +10,7 @@ The simplest production layout is:
 /usr/local/bin/wasmcat-master
 /usr/local/bin/wasmcat-worker
 /usr/local/bin/wasmcatctl
+/usr/local/bin/wasmcat-ui
 /etc/wasmcat/master.env
 /etc/wasmcat/worker.env
 /etc/wasmcat/certs/
@@ -33,12 +34,13 @@ VERSION="v0.1.0"
 BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
 ```
 
-Download the Linux master, Linux worker, operator CLI, systemd service files, and checksums:
+Download the Linux master, Linux worker, operator CLI, browser dashboard, systemd service files, and checksums:
 
 ```bash
 curl -LO "$BASE_URL/wasmcat-master-linux-amd64"
 curl -LO "$BASE_URL/wasmcat-worker-linux-amd64"
 curl -LO "$BASE_URL/wasmcatctl-linux-amd64"
+curl -LO "$BASE_URL/wasmcat-ui-linux-amd64"
 curl -LO "$BASE_URL/wasmcat-master.service"
 curl -LO "$BASE_URL/wasmcat-worker.service"
 curl -LO "$BASE_URL/checksums.txt"
@@ -50,7 +52,7 @@ Verify the downloaded files:
 sha256sum -c checksums.txt --ignore-missing
 ```
 
-Use only the binary required for the host role. A master host needs `wasmcat-master-linux-amd64`; a worker host needs `wasmcat-worker-linux-amd64`. Operator machines can install `wasmcatctl-linux-amd64` to avoid long mTLS `curl` commands.
+Use only the binary required for the host role. A master host needs `wasmcat-master-linux-amd64`; a worker host needs `wasmcat-worker-linux-amd64`. Operator machines can install `wasmcatctl-linux-amd64` to avoid long mTLS `curl` commands and `wasmcat-ui-linux-amd64` for a browser dashboard.
 
 ## Build From Source
 
@@ -80,9 +82,11 @@ Both scripts write release artifacts to `dist/`:
 dist/wasmcat-master-linux-amd64
 dist/wasmcat-worker-linux-amd64
 dist/wasmcatctl-linux-amd64
+dist/wasmcat-ui-linux-amd64
 dist/wasmcat-master-windows-amd64.exe
 dist/wasmcat-worker-windows-amd64.exe
 dist/wasmcatctl-windows-amd64.exe
+dist/wasmcat-ui-windows-amd64.exe
 dist/wasmcat-master.service
 dist/wasmcat-worker.service
 dist/wasmcat-master.env
@@ -99,6 +103,40 @@ VERSION=0.1.0 sh scripts/build.sh
 ```powershell
 .\scripts\build.ps1 -Version 0.1.0
 ```
+
+## Operator Dashboard
+
+`wasmcat-ui` is an optional browser console for operators. It uses the same config file as `wasmcatctl`; the browser talks to the local UI backend, and the backend calls the master over mTLS.
+
+Install the dashboard binary on an operator machine:
+
+```bash
+sudo install -m 0755 wasmcat-ui-linux-amd64 /usr/local/bin/wasmcat-ui
+```
+
+Create the shared CLI/UI config:
+
+```bash
+wasmcatctl config init \
+  --master https://master.example.com:7270 \
+  --ca /etc/wasmcat/certs/ca.crt \
+  --cert /etc/wasmcat/certs/worker-worker-vn-01.crt \
+  --key /etc/wasmcat/certs/worker-worker-vn-01.key
+```
+
+Start the dashboard:
+
+```bash
+wasmcat-ui --listen :7280
+```
+
+Open:
+
+```text
+http://localhost:7280
+```
+
+Keep the dashboard on a trusted operator machine or behind an authenticated network boundary. It can read the configured client private key path in order to call the master.
 
 ## Linux Master Install
 
