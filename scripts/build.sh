@@ -5,6 +5,32 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 DIST_DIR="${DIST_DIR:-"$ROOT_DIR/dist"}"
 VERSION="${VERSION:-dev}"
 
+# require_go fails early with a clear message when the local toolchain is older
+# than the version in go.mod. Old Go reports errors like
+# "invalid go version '1.26.2': must match format 1.23", which is confusing on a VM.
+require_go() {
+  if ! command -v go >/dev/null 2>&1; then
+    echo "error: go toolchain not found." >&2
+    echo "Install the Go version in go.mod, or download prebuilt release binaries instead of building on this host." >&2
+    echo "See docs/INSTALLATION.md (Install or Update With the Script)." >&2
+    exit 1
+  fi
+
+  required="$(awk '/^go /{print $2; exit}' "$ROOT_DIR/go.mod")"
+  installed="$(go env GOVERSION 2>/dev/null | sed 's/^go//')"
+  req_num="$(printf '%s' "$required" | awk -F. '{printf "%d%03d", $1, $2}')"
+  inst_num="$(printf '%s' "$installed" | awk -F. '{printf "%d%03d", $1, $2}')"
+
+  if [ -n "$req_num" ] && [ -n "$inst_num" ] && [ "$inst_num" -lt "$req_num" ]; then
+    echo "error: Go $installed is older than the $required required by go.mod." >&2
+    echo "Upgrade Go to >= $required, or build on another machine and copy the binaries." >&2
+    echo "For production, prefer release binaries (see docs/INSTALLATION.md)." >&2
+    exit 1
+  fi
+}
+
+require_go
+
 mkdir -p "$DIST_DIR"
 
 build_binary() {

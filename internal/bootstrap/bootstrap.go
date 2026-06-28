@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -175,13 +176,51 @@ func InitWorker(options WorkerOptions) (Result, error) {
 		return Result{}, err
 	}
 
+	warnings := []string{
+		fmt.Sprintf("copy ca.crt, worker-%s.crt, and worker-%s.key into the cert directory before starting the worker", options.WorkerID, options.WorkerID),
+	}
+	warnings = append(warnings, workerNetworkWarnings(options.MasterURL, options.AdvertiseAddress)...)
+
 	return Result{
 		ConfigPath: configPath,
 		CertDir:    options.CertDir,
-		Warnings: []string{
-			fmt.Sprintf("copy ca.crt, worker-%s.crt, and worker-%s.key into the cert directory before starting the worker", options.WorkerID, options.WorkerID),
-		},
+		Warnings:   warnings,
 	}, nil
+}
+
+// workerNetworkWarnings flags loopback addresses that work for same-host
+// development but break a multi-VM deployment, the most common setup mistake.
+func workerNetworkWarnings(masterURL string, advertiseAddress string) []string {
+	var warnings []string
+	if parsed, err := url.Parse(masterURL); err == nil && isLoopbackHost(parsed.Hostname()) {
+		warnings = append(warnings, "MASTER_URL points at a loopback host; on a separate worker VM set it to the master private IP or DNS name, for example https://MASTER_PRIVATE_IP:7270")
+	}
+	if isLoopbackHost(hostOnly(advertiseAddress)) {
+		warnings = append(warnings, "WORKER_ADVERTISE_ADDRESS points at a loopback host; the master must reach this address, so on a separate VM use WORKER_PRIVATE_IP:7271")
+	}
+
+	return warnings
+}
+
+func hostOnly(address string) string {
+	address = strings.TrimSpace(address)
+	if host, _, err := net.SplitHostPort(address); err == nil {
+		return host
+	}
+
+	return address
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+
+	return false
 }
 
 func normalizeMaster(options MasterOptions) MasterOptions {
@@ -263,7 +302,7 @@ func normalizeWorker(options WorkerOptions) WorkerOptions {
 		options.AutoDetectLocation = true
 	}
 	if options.LocationProviderURL == "" {
-		options.LocationProviderURL = geolocation.DefaultProviderURL
+		options.LocationProviderURL = geolocation.DefaultProviderURLs
 	}
 	if options.CertDir == "" && options.ConfigDir != "" {
 		options.CertDir = filepath.Join(options.ConfigDir, "certs")

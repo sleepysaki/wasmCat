@@ -24,6 +24,9 @@ REPO="${WASMCAT_REPO:-}"
 ARCH=""
 BIN_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/wasmcat"
+STATE_DIR="/var/lib/wasmcat"
+SERVICE_USER="wasmcat"
+CERTS_FROM=""
 INSTALL_SERVICE=0
 NO_RESTART=0
 ROLLBACK=0
@@ -54,7 +57,8 @@ usage() {
   cat <<'EOF'
 Usage: install-or-update.sh --role LIST [options]
 
-Required:
+Role (required; positional or flag):
+  install-or-update.sh master            Positional shorthand for --role master.
   --role LIST           Comma-separated components: master,worker,ctl,ui (or 'all').
 
 Source of binaries (choose one; defaults to --source ./dist):
@@ -67,8 +71,11 @@ Source of binaries (choose one; defaults to --source ./dist):
 Options:
   --arch ARCH           Target architecture: amd64 or arm64 (default: autodetect).
   --bin-dir DIR         Install directory (default: /usr/local/bin).
-  --config-dir DIR      Config directory to preserve, never modified
+  --config-dir DIR      Config directory; env/certs/DB here are preserved
                         (default: /etc/wasmcat).
+  --certs-from DIR      Copy a cert bundle (from gen-certs.sh) into
+                        <config-dir>/certs with correct ownership and per-file
+                        permissions. Existing certs are overwritten.
   --install-service     Also install/refresh the systemd unit file(s) from source
                         and run daemon-reload.
   --no-restart          Install binaries but do not restart any service.
@@ -83,6 +90,14 @@ Components map to: binary name / systemd service / version command
   ui      wasmcat-ui      (none)          "wasmcat-ui --version"
 EOF
 }
+
+# Allow a leading positional role: install-or-update.sh master --source ./dist
+if [ $# -gt 0 ]; then
+  case "$1" in
+    -*) : ;;
+    *) ROLE="$1"; shift ;;
+  esac
+fi
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -100,6 +115,8 @@ while [ $# -gt 0 ]; do
     --bin-dir=*) BIN_DIR="${1#*=}"; shift ;;
     --config-dir) CONFIG_DIR="${2:-}"; shift 2 ;;
     --config-dir=*) CONFIG_DIR="${1#*=}"; shift ;;
+    --certs-from) CERTS_FROM="${2:-}"; shift 2 ;;
+    --certs-from=*) CERTS_FROM="${1#*=}"; shift ;;
     --install-service) INSTALL_SERVICE=1; shift ;;
     --no-restart) NO_RESTART=1; shift ;;
     --rollback) ROLLBACK=1; shift ;;
@@ -176,6 +193,61 @@ need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     die "writing to $BIN_DIR requires root; re-run with sudo"
   fi
+}
+
+components_include() {
+  for component in $COMPONENTS; do
+    [ "$component" = "$1" ] && return 0
+  done
+  return 1
+}
+
+is_node_role() {
+  components_include master || components_include worker
+}
+
+# ensure_service_user creates the dedicated wasmcat system account before any
+# chown, so installs do not fail with "chown: invalid user: 'wasmcat:wasmcat'".
+ensure_service_user() {
+  if id "$SERVICE_USER" >/dev/null 2>&1; then
+    return 0
+  fi
+  log "creating service user $SERVICE_USER"
+  run useradd --system --home "$STATE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER" || true
+}
+
+ensure_dirs() {
+  run mkdir -p "$CONFIG_DIR" "$STATE_DIR"
+  if id "$SERVICE_USER" >/dev/null 2>&1; then
+    run chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR" "$STATE_DIR"
+  fi
+}
+
+# install_certs copies a gen-certs.sh bundle into <config-dir>/certs using
+# explicit per-file permissions instead of fragile "chmod *.crt" wildcards that
+# fail when a file is missing.
+install_certs() {
+  [ -d "$CERTS_FROM" ] || die "--certs-from $CERTS_FROM is not a directory"
+  dst="$CONFIG_DIR/certs"
+  run mkdir -p "$dst"
+
+  copied=0
+  for path in "$CERTS_FROM"/*; do
+    [ -f "$path" ] || continue
+    base="$(basename "$path")"
+    case "$base" in
+      *.crt) run install -m 0640 "$path" "$dst/$base"; copied=1 ;;
+      *.key) run install -m 0600 "$path" "$dst/$base"; copied=1 ;;
+      *) : ;;
+    esac
+  done
+  [ "$copied" -eq 1 ] || warn "no .crt/.key files found in $CERTS_FROM"
+
+  if id "$SERVICE_USER" >/dev/null 2>&1; then
+    run chown -R "$SERVICE_USER:$SERVICE_USER" "$dst"
+  fi
+  run chmod 0750 "$dst"
+  log "installed certs into $dst with explicit per-file permissions"
 }
 
 download_release() {
@@ -317,7 +389,17 @@ main() {
     download_release
   fi
 
-  log "config directory $CONFIG_DIR is preserved and not modified"
+  # A node role needs the service account and directories in place before any
+  # chown/cert copy. Operator-only installs (ctl/ui) skip this.
+  if is_node_role; then
+    ensure_service_user
+    ensure_dirs
+  fi
+  if [ -n "$CERTS_FROM" ]; then
+    install_certs
+  fi
+
+  log "preserving $CONFIG_DIR/*.env, $CONFIG_DIR/certs, and the SQLite job database"
   log "installing: $COMPONENTS (arch=$ARCH, bin-dir=$BIN_DIR)"
   for component in $COMPONENTS; do
     install_component "$component"

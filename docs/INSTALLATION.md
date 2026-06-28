@@ -381,28 +381,33 @@ This mode is for development only. Production should provide certificates throug
 
 What it does for each selected component:
 
+- creates the `wasmcat` service user and `/etc/wasmcat` + `/var/lib/wasmcat` (master/worker roles), so installs never fail with `chown: invalid user`,
 - backs up the current binary as `<binary>.bak` before replacing it,
 - installs the new binary into `/usr/local/bin`,
 - shows the installed version and the new version,
+- optionally copies a certificate bundle (`--certs-from`) with explicit per-file permissions,
 - restarts only the relevant systemd service (`wasmcat-master` or `wasmcat-worker`),
 - automatically rolls that component back to `.bak` if the service fails to come back active.
 
-It never touches the config directory, so `/etc/wasmcat/*.env`, `/etc/wasmcat/certs`, and the SQLite job database are preserved across updates.
+It never overwrites `/etc/wasmcat/*.env` or the SQLite job database, so configuration and durable jobs are preserved across updates. (`--certs-from` is the one exception: it intentionally writes the certs you point it at.)
 
-Build (or download) the binaries first, then run the script for the host role:
+Build (or download) the binaries first, then run the script for the host role. The role can be positional or a `--role` flag:
 
 ```bash
 # Build artifacts into ./dist on a build machine, then copy the repo or dist/ to the VM.
 sh scripts/build.sh
 
-# Master VM:
-sudo sh scripts/install-or-update.sh --role master --source ./dist
+# Master VM (positional role):
+sudo sh scripts/install-or-update.sh master --source ./dist
 
 # Worker VM:
-sudo sh scripts/install-or-update.sh --role worker --source ./dist
+sudo sh scripts/install-or-update.sh worker --source ./dist
+
+# Master VM, also installing the cert bundle produced by gen-certs.sh:
+sudo sh scripts/install-or-update.sh master --source ./dist --certs-from /tmp/master-certs
 
 # Operator machine (no systemd services involved):
-sh scripts/install-or-update.sh --role ctl,ui --source ./dist --bin-dir "$HOME/.local/bin"
+sh scripts/install-or-update.sh ctl,ui --source ./dist --bin-dir "$HOME/.local/bin"
 ```
 
 Install directly from a tagged GitHub release instead of a local `dist/` (checksums are verified when published):
@@ -432,6 +437,38 @@ sudo sh scripts/install-or-update.sh --role master --source ./dist --dry-run
 ```
 
 Run `sh scripts/install-or-update.sh --help` for the full option list.
+
+## Generate mTLS Certificates
+
+`scripts/gen-certs.sh` generates a complete cluster bundle from a single CA, which avoids the most common mTLS setup failures (CA mismatch between nodes, worker certificates missing `clientAuth`, master certificates missing the private IP in their SAN, and worker certificate filenames not matching `WORKER_ID`).
+
+Run it on an operator machine (not on the nodes). The CA private key stays in the PKI directory (`./wasmcat-pki` by default) and is never copied to a node:
+
+```bash
+sh scripts/gen-certs.sh master --ip MASTER_PRIVATE_IP --dns master.internal
+sh scripts/gen-certs.sh worker --id worker-vn-01 --ip WORKER_PRIVATE_IP
+sh scripts/gen-certs.sh operator --id wasmcat-operator
+```
+
+This writes per-node bundles under `./wasmcat-certs/`:
+
+```text
+wasmcat-certs/master/                 ca.crt master.crt master.key
+wasmcat-certs/worker-worker-vn-01/    ca.crt worker-worker-vn-01.crt worker-worker-vn-01.key
+wasmcat-certs/operator/               ca.crt operator.crt operator.key
+```
+
+Copy each bundle to its node and install it with the cert step of the install script (which sets ownership and per-file permissions):
+
+```bash
+scp -r wasmcat-certs/master azureuser@MASTER_PRIVATE_IP:/tmp/master-certs
+# on the master VM:
+sudo sh scripts/install-or-update.sh master --source ./dist --certs-from /tmp/master-certs
+```
+
+Keep `wasmcat-pki/` (the CA) safe and offline. To add a worker later, run `gen-certs.sh worker --id NEW_ID --ip NEW_IP` against the same PKI directory; it reuses the existing CA so every node still trusts one authority. Verify the shared CA fingerprint at any time with `sh scripts/gen-certs.sh fingerprint`.
+
+If the master sets `EXECUTE_CLIENT_ALLOWLIST`, add the operator identity (the operator certificate common name, e.g. `wasmcat-operator`) to it. See [EXECUTION_AUTHORIZATION.md](EXECUTION_AUTHORIZATION.md).
 
 ## Manual Upgrade
 
