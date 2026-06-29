@@ -1,9 +1,11 @@
 package worker
 
 import (
+	"bytes"
 	"context" // manage lifecycle, kill fnc after timeout to save resources
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +16,8 @@ import (
 	"wasmcat/internal/shared"
 
 	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+	"github.com/tetratelabs/wazero/sys"
 )
 
 type ModuleCacheKey struct {
@@ -97,8 +101,14 @@ func NewWasmEngine(ctx context.Context) *WasmEngine {
 func NewWasmEngineWithLimits(ctx context.Context, limits Limits) *WasmEngine {
 	limits = normalizeLimits(limits)
 
+	runtime := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true))
+	// Instantiate the WASI host once so standard wasip1 modules (compiled from
+	// Rust, Go, TinyGo, C, etc.) can be executed alongside custom-ABI modules.
+	// Custom-ABI modules simply do not import these functions, so this is safe.
+	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
+
 	return &WasmEngine{
-		runtime:  wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true)),
+		runtime:  runtime,
 		cache:    make(map[string]moduleCacheEntry),
 		inflight: make(map[string]chan struct{}),
 		client:   shared.NewHTTPClient(),
@@ -216,9 +226,17 @@ func (e *WasmEngine) Execute(ctx context.Context, moduleName string, moduleURL s
 	return e.ExecuteWithDigest(ctx, moduleName, moduleURL, "", payload, bearerToken)
 }
 
-func (e *WasmEngine) ExecuteWithDigest(ctx context.Context, moduleName string, moduleURL string, moduleDigest string, payload string, bearerToken string) (result string, err error) {
+func (e *WasmEngine) ExecuteWithDigest(ctx context.Context, moduleName string, moduleURL string, moduleDigest string, payload string, bearerToken string) (string, error) {
+	return e.ExecuteWithDigestAndABI(ctx, moduleName, moduleURL, moduleDigest, payload, bearerToken, shared.ModuleABIAuto)
+}
+
+// ExecuteWithDigestAndABI runs a module under the requested ABI mode. An empty
+// abi auto-detects: a module exporting run uses the custom wasmCat ABI, and a
+// module exporting _start uses WASI. This lets the worker run both the original
+// lightweight modules and standard production wasip1 modules.
+func (e *WasmEngine) ExecuteWithDigestAndABI(ctx context.Context, moduleName string, moduleURL string, moduleDigest string, payload string, bearerToken string, abi string) (result string, err error) {
 	start := time.Now()
-	slog.Info("wasm execution started", "module_name", moduleName, "module_digest", moduleDigest, "payload_bytes", len(payload))
+	slog.Info("wasm execution started", "module_name", moduleName, "module_digest", moduleDigest, "abi", abi, "payload_bytes", len(payload))
 	defer func() {
 		if err != nil {
 			slog.Error("wasm execution failed", "module_name", moduleName, "duration_ms", time.Since(start).Milliseconds(), "error", err)
@@ -265,33 +283,71 @@ func (e *WasmEngine) ExecuteWithDigest(ctx context.Context, moduleName string, m
 		return "", fmt.Errorf("module %s not loaded", moduleName)
 	}
 
-	// Instantiate a fresh module for this execution.
-	// Each request gets its own instance and its own linear memory, so requests do not share data.
-	mod, err := e.runtime.InstantiateModule(execCtx, compiled, wazero.NewModuleConfig())
+	mode, err := resolveModuleABI(abi, compiled, moduleName)
+	if err != nil {
+		return "", err
+	}
+
+	switch mode {
+	case shared.ModuleABIWASI:
+		result, err = e.runWASIModule(execCtx, compiled, moduleName, payload)
+	default:
+		result, err = e.runWasmcatModule(execCtx, compiled, moduleName, payload)
+	}
+	if err != nil {
+		return "", err
+	}
+
+	slog.Info("wasm execution completed", "module_name", moduleName, "abi", mode, "duration_ms", time.Since(start).Milliseconds(), "output_bytes", len(result))
+	return result, nil
+}
+
+// resolveModuleABI returns the explicit ABI when set, otherwise detects it from
+// the compiled module's exports.
+func resolveModuleABI(abi string, compiled wazero.CompiledModule, moduleName string) (string, error) {
+	switch abi {
+	case shared.ModuleABIWasmcat, shared.ModuleABIWASI:
+		return abi, nil
+	case shared.ModuleABIAuto:
+		exports := compiled.ExportedFunctions()
+		if _, ok := exports["run"]; ok {
+			return shared.ModuleABIWasmcat, nil
+		}
+		if _, ok := exports["_start"]; ok {
+			return shared.ModuleABIWASI, nil
+		}
+		return "", fmt.Errorf("module %s exports neither run (wasmcat ABI) nor _start (wasi); set abi explicitly", moduleName)
+	default:
+		return "", fmt.Errorf("unsupported abi %q for module %s", abi, moduleName)
+	}
+}
+
+// runWasmcatModule executes a custom-ABI module: it writes the payload into the
+// module's linear memory and calls run(ptr, len), which returns a packed uint64
+// holding the output pointer (high 32 bits) and length (low 32 bits).
+func (e *WasmEngine) runWasmcatModule(ctx context.Context, compiled wazero.CompiledModule, moduleName string, payload string) (string, error) {
+	// Instantiate a fresh module for this execution. WithName("") keeps the
+	// instance anonymous so concurrent requests for the same named module do not
+	// collide in the runtime's module namespace.
+	mod, err := e.runtime.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(""))
 	if err != nil {
 		return "", fmt.Errorf("instantiate module %s: %w", moduleName, err)
 	}
-	defer mod.Close(execCtx)
+	defer mod.Close(ctx)
 
-	// Step 4: copy the input string into the module's linear memory.
-	// Go memory and Wasm memory are separate, so we cannot pass a Go string directly.
-	inputPtr, err := WriteString(execCtx, mod, payload)
+	// Copy the input string into the module's linear memory. Go memory and Wasm
+	// memory are separate, so we cannot pass a Go string directly.
+	inputPtr, err := WriteString(ctx, mod, payload)
 	if err != nil {
 		return "", fmt.Errorf("write input for %s: %w", moduleName, err)
 	}
 
-	// Find the exported entrypoint.
-	// Expect modules to export:
-	//   run(ptr uint32, len uint32) uint64
-	// The uint64 packs the output pointer in the high 32 bits and output length in the low 32 bits.
 	run := mod.ExportedFunction("run")
 	if run == nil {
 		return "", fmt.Errorf("module %s does not export run", moduleName)
 	}
 
-	// Call the Wasm function.
-	// Wazero uses uint64 values for all Wasm parameters/results at the Go API boundary.
-	results, err := run.Call(execCtx, uint64(inputPtr), uint64(len(payload)))
+	results, err := run.Call(ctx, uint64(inputPtr), uint64(len(payload)))
 	if err != nil {
 		return "", fmt.Errorf("run module %s: %w", moduleName, err)
 	}
@@ -299,8 +355,6 @@ func (e *WasmEngine) ExecuteWithDigest(ctx context.Context, moduleName string, m
 		return "", fmt.Errorf("module %s returned no result", moduleName)
 	}
 
-	// Unpack the pointer and length returned by the module.
-	// This keeps the first ABI small because one Wasm result can carry both values.
 	packedOutput := results[0]
 	outputPtr := uint32(packedOutput >> 32)
 	outputLen := uint32(packedOutput)
@@ -308,14 +362,84 @@ func (e *WasmEngine) ExecuteWithDigest(ctx context.Context, moduleName string, m
 		return "", fmt.Errorf("output exceeds max size of %d bytes", e.limits.MaxOutputBytes)
 	}
 
-	// Read the output bytes back out of Wasm memory and return them as a Go string.
 	output, err := ReadString(mod, outputPtr, outputLen)
 	if err != nil {
 		return "", fmt.Errorf("read output for %s: %w", moduleName, err)
 	}
 
-	slog.Info("wasm execution completed", "module_name", moduleName, "duration_ms", time.Since(start).Milliseconds(), "output_bytes", len(output))
 	return output, nil
+}
+
+// runWASIModule executes a standard wasip1 command module: the payload is fed on
+// stdin and the result is read from stdout. This is the path for production
+// modules compiled from Rust, Go, TinyGo, C, and similar toolchains.
+func (e *WasmEngine) runWASIModule(ctx context.Context, compiled wazero.CompiledModule, moduleName string, payload string) (string, error) {
+	stdout := &cappedBuffer{max: int(e.limits.MaxOutputBytes)}
+	stderr := &cappedBuffer{max: 4096}
+
+	config := wazero.NewModuleConfig().
+		WithName("").
+		WithStdin(strings.NewReader(payload)).
+		WithStdout(stdout).
+		WithStderr(stderr).
+		WithSysWalltime().
+		WithSysNanotime()
+
+	// For a command module, _start runs during instantiation. A clean WASI exit
+	// surfaces as a sys.ExitError; exit code 0 is success.
+	mod, err := e.runtime.InstantiateModule(ctx, compiled, config)
+	if mod != nil {
+		defer mod.Close(ctx)
+	}
+	if err != nil {
+		var exitErr *sys.ExitError
+		if errors.As(err, &exitErr) {
+			if code := exitErr.ExitCode(); code != 0 {
+				return "", fmt.Errorf("wasi module %s exited with code %d: %s", moduleName, code, strings.TrimSpace(stderr.String()))
+			}
+		} else {
+			return "", fmt.Errorf("run wasi module %s: %w", moduleName, err)
+		}
+	}
+
+	if stdout.overflow {
+		return "", fmt.Errorf("output exceeds max size of %d bytes", e.limits.MaxOutputBytes)
+	}
+
+	return stdout.String(), nil
+}
+
+// cappedBuffer collects WASI output but stops growing past max bytes so a module
+// cannot exhaust worker memory through stdout/stderr.
+type cappedBuffer struct {
+	buf      bytes.Buffer
+	max      int
+	overflow bool
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if c.max <= 0 {
+		return c.buf.Write(p)
+	}
+	if c.overflow {
+		return len(p), nil
+	}
+	remaining := c.max - c.buf.Len()
+	if remaining <= 0 {
+		c.overflow = true
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		_, _ = c.buf.Write(p[:remaining])
+		c.overflow = true
+		return len(p), nil
+	}
+
+	return c.buf.Write(p)
+}
+
+func (c *cappedBuffer) String() string {
+	return c.buf.String()
 }
 
 func (e *WasmEngine) downloadAndCompile(ctx context.Context, moduleName, moduleURL string, moduleDigest string, bearerToken string) (wazero.CompiledModule, []byte, error) {

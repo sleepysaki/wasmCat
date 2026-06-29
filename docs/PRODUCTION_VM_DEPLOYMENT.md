@@ -204,28 +204,94 @@ journalctl -u wasmcat-master -f
 journalctl -u wasmcat-worker -f
 ```
 
+### Updating an Existing Deployment
+
+After the first deployment, use `scripts/install-or-update.sh` instead of repeating the manual `install`/`restart` steps. It backs up the current binary as `<binary>.bak`, installs the new one, restarts only the matching service, and rolls back automatically if the service does not return to active. It never modifies `/etc/wasmcat`, so env files, certificates, and the SQLite job database survive the update.
+
+Build the new binaries on the build machine and copy the repository (or just `dist/` plus the script) to the VM, then:
+
+```bash
+# On the master VM:
+sudo sh scripts/install-or-update.sh --role master --source ./dist
+
+# On each worker VM:
+sudo sh scripts/install-or-update.sh --role worker --source ./dist
+```
+
+Or update straight from a tagged GitHub release (checksums verified when published):
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --version v0.1.0 --repo <your-org>/wasmCat
+```
+
+If an update misbehaves, roll the previous binary back and restart the service:
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --rollback
+```
+
+See [INSTALLATION.md](INSTALLATION.md#install-or-update-with-the-script) for the full option list.
+
 ## 2. Code-to-Node Pipeline
 
-### WASM ABI Required by wasmCat
+### Module Execution Modes
 
-The current worker expects each module to export:
+The worker runs two kinds of modules, chosen by the `abi` field on the request
+(empty auto-detects):
 
-```text
-memory
-malloc(size uint32) uint32
-run(ptr uint32, len uint32) uint64
-```
+1. **WASI (`abi: wasi`, recommended for production code).** Standard `wasip1`
+   command modules from Rust, Go, TinyGo, C, etc. The module reads the payload
+   from **stdin** and writes its result to **stdout**. This is the easiest path
+   for real production logic. Build one with standard Go:
 
-The `run` return value packs the output pointer and length:
+   ```bash
+   cat > main.go <<'EOF'
+   package main
 
-```text
-high 32 bits = output pointer
-low 32 bits  = output length
-```
+   import (
+       "bufio"
+       "fmt"
+       "os"
+       "strconv"
+       "strings"
+   )
 
-### Example Addition Module
+   func main() {
+       in, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+       parts := strings.Split(strings.TrimSpace(in), ",")
+       a, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
+       b := 0
+       if len(parts) > 1 {
+           b, _ = strconv.Atoi(strings.TrimSpace(parts[1]))
+       }
+       fmt.Print(a + b)
+   }
+   EOF
+   GOOS=wasip1 GOARCH=wasm go build -o add.wasm main.go
+   ```
 
-The current ABI is easiest to target with TinyGo because standard Go `GOOS=wasip1 GOARCH=wasm` produces a WASI module with runtime imports that wasmCat does not yet instantiate. Use this file as `add.go`:
+   Execute it with `wasmcatctl execute --module add --url ... --payload "2,3" --abi wasi`.
+
+2. **Custom wasmCat ABI (`abi: wasmcat`).** A lightweight ABI for purpose-built
+   modules that export:
+
+   ```text
+   memory
+   malloc(size uint32) uint32
+   run(ptr uint32, len uint32) uint64
+   ```
+
+   The `run` return value packs the output pointer and length:
+
+   ```text
+   high 32 bits = output pointer
+   low 32 bits  = output length
+   ```
+
+### Example Custom-ABI Module
+
+This module targets the custom wasmCat ABI with TinyGo. Use it when you want the
+smaller ABI instead of WASI. Use this file as `add.go`:
 
 ```go
 package main
@@ -299,11 +365,13 @@ tinygo build -target=wasm -no-debug -o add.wasm add.go
 sha256sum add.wasm
 ```
 
-If you intentionally test the standard Go WASI compiler path, this command produces a WASI module, but that module is not compatible with the current wasmCat ABI-only worker without adding WASI host imports:
+The standard Go WASI compiler path produces a `wasip1` module that the worker runs directly in WASI mode (stdin/stdout). Build it and execute with `--abi wasi` (or let the worker auto-detect):
 
 ```bash
 GOOS=wasip1 GOARCH=wasm go build -o add-wasi.wasm add.go
 ```
+
+Note that the WASI version reads its input from stdin and writes to stdout (see the WASI example above), so its source differs from the custom-ABI `add.go`.
 
 ### Push the Module to Azure Container Registry
 

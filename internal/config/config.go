@@ -170,6 +170,20 @@ func listEnv(name string) []string {
 	return values
 }
 
+// splitProviderURLs turns a comma-separated WORKER_LOCATION_PROVIDER_URL into an
+// ordered list of provider URLs for fallback detection.
+func splitProviderURLs(value string) []string {
+	parts := strings.Split(value, ",")
+	urls := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			urls = append(urls, trimmed)
+		}
+	}
+
+	return urls
+}
+
 func LoadWorker() (WorkerConfig, error) {
 	heartbeatInterval, err := positiveDurationEnv("HEARTBEAT_INTERVAL", 5*time.Second)
 	if err != nil {
@@ -184,7 +198,7 @@ func LoadWorker() (WorkerConfig, error) {
 	if err != nil {
 		return WorkerConfig{}, err
 	}
-	locationProviderURL := stringEnv("WORKER_LOCATION_PROVIDER_URL", geolocation.DefaultProviderURL)
+	locationProviderURL := stringEnv("WORKER_LOCATION_PROVIDER_URL", geolocation.DefaultProviderURLs)
 
 	latitude, longitude, locationSource, err := loadWorkerCoordinates()
 	if err != nil {
@@ -228,7 +242,7 @@ func ResolveWorkerLocation(ctx context.Context, cfg WorkerConfig) (WorkerConfig,
 		if !cfg.AutoDetectLocation {
 			return WorkerConfig{}, fmt.Errorf("worker location is not configured; set WORKER_LATITUDE/WORKER_LONGITUDE or enable WORKER_AUTO_DETECT_LOCATION")
 		}
-		detected, err := geolocation.Detect(ctx, cfg.LocationProviderURL)
+		detected, err := geolocation.DetectWithFallback(ctx, splitProviderURLs(cfg.LocationProviderURL))
 		if err != nil {
 			return WorkerConfig{}, fmt.Errorf("auto-detect worker location: %w", err)
 		}

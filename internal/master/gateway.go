@@ -69,6 +69,7 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/jobs", g.handleCreateJob)
 	mux.HandleFunc("/api/v1/jobs/", g.handleGetJob)
 	mux.HandleFunc("/api/v1/workers", g.handleListWorkers)
+	mux.HandleFunc("/api/v1/workers/", g.handleWorkerSubresource)
 	return logging.MiddlewareWithMetrics("master", mux, g.metrics())
 }
 
@@ -469,6 +470,52 @@ func (g *Gateway) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shared.WriteJSON(w, http.StatusOK, g.Registry.GetActiveWorkers())
+}
+
+// handleWorkerSubresource routes operator actions on a specific worker, for
+// example POST /api/v1/workers/{id}/drain. Unlike /internal/drain (which a
+// worker uses to drain itself and is gated by worker certificate identity),
+// these routes are operator-facing and are authorized the same way as the rest
+// of the /api/v1 surface: by the optional execute-client allowlist.
+func (g *Gateway) handleWorkerSubresource(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/workers/")
+	workerID, action, ok := strings.Cut(rest, "/")
+	workerID = strings.TrimSpace(workerID)
+	if !ok || workerID == "" {
+		shared.WriteError(w, http.StatusNotFound, "not_found", fmt.Errorf("unknown worker route"))
+		return
+	}
+
+	switch action {
+	case "drain":
+		g.handleOperatorDrain(w, r, workerID)
+	default:
+		shared.WriteError(w, http.StatusNotFound, "not_found", fmt.Errorf("unknown worker action %q", action))
+	}
+}
+
+func (g *Gateway) handleOperatorDrain(w http.ResponseWriter, r *http.Request, workerID string) {
+	if !shared.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if err := g.validateExecuteClientIdentity(r); err != nil {
+		shared.WriteError(w, http.StatusForbidden, "execute_client_unauthorized", err)
+		return
+	}
+	if g.Registry == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "not_ready", fmt.Errorf("worker registry is not initialized"))
+		return
+	}
+
+	if err := g.Registry.DrainWorker(workerID); err != nil {
+		shared.WriteError(w, http.StatusNotFound, "worker_not_found", err)
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, shared.APIResponse{
+		Status:  "success",
+		Message: "Worker marked as draining",
+	})
 }
 
 func (g *Gateway) decodeExecutionRequest(w http.ResponseWriter, r *http.Request) (shared.ExecutionRequest, bool) {

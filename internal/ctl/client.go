@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"wasmcat/internal/security"
 	"wasmcat/internal/shared"
@@ -122,9 +123,12 @@ func (c *Client) Drain(ctx context.Context, workerID string) (shared.APIResponse
 		return shared.APIResponse{}, fmt.Errorf("worker_id is required")
 	}
 
+	// Operators drain through the operator-facing /api/v1 surface, which is
+	// authorized by the execute-client allowlist. The worker-identity-gated
+	// /internal/drain endpoint is reserved for a worker draining itself.
 	var response shared.APIResponse
-	req := shared.DrainRequest{NodeID: workerID}
-	if err := c.doJSON(ctx, http.MethodPost, "/internal/drain", req, &response); err != nil {
+	path := "/api/v1/workers/" + url.PathEscape(workerID) + "/drain"
+	if err := c.doJSON(ctx, http.MethodPost, path, nil, &response); err != nil {
 		return shared.APIResponse{}, err
 	}
 

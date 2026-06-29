@@ -12,6 +12,11 @@ import (
 
 const DefaultProviderURL = "https://ipapi.co/json/"
 
+// DefaultProviderURLs is the comma-separated default used by worker bootstrap.
+// Listing more than one provider lets the worker fall back when the first is
+// rate-limited (the 429 failure seen on Azure VMs).
+const DefaultProviderURLs = "https://ipapi.co/json/,https://ipinfo.io/json"
+
 const defaultDetectionTimeout = 2 * time.Second
 
 type Coordinates struct {
@@ -70,6 +75,34 @@ func Detect(ctx context.Context, providerURL string) (Coordinates, error) {
 	}
 
 	return Coordinates{Latitude: lat, Longitude: lon, Source: "auto"}, nil
+}
+
+// DetectWithFallback tries each provider URL in order and returns the first
+// successful result. A rate-limited or unreachable provider (for example a
+// public geolocation service returning 429) no longer blocks worker startup
+// when alternatives are configured. The error aggregates every provider failure
+// so the operator can see exactly what was tried.
+func DetectWithFallback(ctx context.Context, providerURLs []string) (Coordinates, error) {
+	urls := make([]string, 0, len(providerURLs))
+	for _, providerURL := range providerURLs {
+		if trimmed := strings.TrimSpace(providerURL); trimmed != "" {
+			urls = append(urls, trimmed)
+		}
+	}
+	if len(urls) == 0 {
+		urls = []string{DefaultProviderURL}
+	}
+
+	failures := make([]string, 0, len(urls))
+	for _, providerURL := range urls {
+		coords, err := Detect(ctx, providerURL)
+		if err == nil {
+			return coords, nil
+		}
+		failures = append(failures, fmt.Sprintf("%s (%v)", providerURL, err))
+	}
+
+	return Coordinates{}, fmt.Errorf("all location providers failed: %s", strings.Join(failures, "; "))
 }
 
 func (r providerResponse) coordinates() (float64, float64, error) {

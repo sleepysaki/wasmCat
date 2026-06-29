@@ -132,6 +132,22 @@ go run ./cmd/wasmcatctl execute `
   --payload-file .\payload.json
 ```
 
+### Execution ABI
+
+Use `--abi` to choose the execution mode. It applies to both `execute` and `jobs create`:
+
+- `--abi wasi` for a standard `wasip1` module (payload on stdin, result on stdout), the recommended mode for production code built with Rust, Go, TinyGo, or C.
+- `--abi wasmcat` for a custom-ABI module (`memory`/`malloc`/`run`).
+- omit `--abi` to auto-detect from the module's exports (`run` -> wasmcat, `_start` -> wasi).
+
+```powershell
+go run ./cmd/wasmcatctl execute `
+  --module add `
+  --url https://example.com/modules/add-wasi.wasm `
+  --abi wasi `
+  --payload "2,3"
+```
+
 ## Durable Jobs
 
 Create an asynchronous durable job:
@@ -159,6 +175,8 @@ go run ./cmd/wasmcatctl drain worker-vn-01
 ```
 
 After this, the scheduler excludes that worker from new executions while the worker remains visible in the registry.
+
+`drain` calls the operator endpoint `POST /api/v1/workers/{id}/drain`, which is authorized like the other `/api/v1` calls. If the master sets `EXECUTE_CLIENT_ALLOWLIST`, the identity in your configured `client_cert` must be listed, otherwise the call returns `403 execute_client_unauthorized`. This is separate from a worker draining itself on shutdown over `/internal/drain`.
 
 ## Output Formats
 

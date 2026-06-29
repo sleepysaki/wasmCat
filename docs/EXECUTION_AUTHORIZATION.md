@@ -1,6 +1,16 @@
 # Execution Client Authorization
 
-The master always requires mTLS at the HTTPS server layer. `EXECUTE_CLIENT_ALLOWLIST` adds a second authorization check for client-facing execution APIs: `POST /api/v1/execute`, `POST /api/v1/jobs`, and `GET /api/v1/jobs/{request_id}`.
+The master always requires mTLS at the HTTPS server layer. `EXECUTE_CLIENT_ALLOWLIST` adds a second authorization check for the operator-facing `/api/v1` surface:
+
+- `POST /api/v1/execute`
+- `POST /api/v1/jobs`
+- `GET /api/v1/jobs/{request_id}`
+- `GET /api/v1/workers`
+- `POST /api/v1/workers/{id}/drain`
+
+These are the endpoints used by `wasmcatctl` and the `wasmcat-ui` dashboard. When the allowlist is set, the operator certificate identity (CLI/UI `client_cert`) must be listed, otherwise these calls return `403 execute_client_unauthorized`. A common symptom of a missing entry is a dashboard that loads but cannot list workers or drain a node.
+
+Operator drain (`POST /api/v1/workers/{id}/drain`) is distinct from worker self-drain (`POST /internal/drain`). Self-drain is gated by worker certificate identity and is used by a worker to drain itself on shutdown; it is not affected by `EXECUTE_CLIENT_ALLOWLIST`.
 
 ## Configuration
 

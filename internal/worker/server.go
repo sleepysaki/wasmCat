@@ -126,8 +126,8 @@ func (s *WorkerServer) handleInvoke(w http.ResponseWriter, r *http.Request) {
 	// inbound HTTP request. If the master restarts after dispatching, the worker
 	// should still finish bounded execution and report completion through the
 	// callback path instead of losing the result with the broken connection.
-	slog.Info("worker execution request received", "request_id", req.RequestID, "module_name", req.ModuleName, "module_digest", req.ModuleDigest)
-	result, err := s.Engine.ExecuteWithDigest(context.Background(), req.ModuleName, req.ModuleURL, req.ModuleDigest, req.Payload, req.JITBearerToken)
+	slog.Info("worker execution request received", "request_id", req.RequestID, "module_name", req.ModuleName, "module_digest", req.ModuleDigest, "abi", req.ModuleABI)
+	result, err := s.Engine.ExecuteWithDigestAndABI(context.Background(), req.ModuleName, req.ModuleURL, req.ModuleDigest, req.Payload, req.JITBearerToken, req.ModuleABI)
 	if err != nil {
 		errorCode := workerExecutionErrorCode(err)
 		s.metrics().IncWorkerExecutionFailure()

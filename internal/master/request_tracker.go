@@ -219,6 +219,7 @@ func executionRequestFingerprint(req shared.ExecutionRequest) (string, error) {
 		ModuleURL         string  `json:"module_url"`
 		ModuleRegistryURL string  `json:"module_registry_url"`
 		ModuleDigest      string  `json:"module_digest"`
+		ModuleABI         string  `json:"abi"`
 		UserLat           float64 `json:"user_lat"`
 		UserLon           float64 `json:"user_lon"`
 	}{
@@ -227,6 +228,7 @@ func executionRequestFingerprint(req shared.ExecutionRequest) (string, error) {
 		ModuleURL:         req.ModuleURL,
 		ModuleRegistryURL: req.ModuleRegistryURL,
 		ModuleDigest:      req.ModuleDigest,
+		ModuleABI:         req.ModuleABI,
 		UserLat:           req.UserLat,
 		UserLon:           req.UserLon,
 	}

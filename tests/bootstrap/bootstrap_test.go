@@ -247,6 +247,75 @@ func TestInitWorkerWritesEnv(t *testing.T) {
 	assertContains(t, env, "MODULE_CACHE_TTL=10m\n")
 }
 
+func TestInitWorkerWarnsOnLoopbackNetworkConfig(t *testing.T) {
+	configDir := t.TempDir()
+
+	result, err := bootstrap.InitWorker(bootstrap.WorkerOptions{
+		ConfigDir:          configDir,
+		CertDir:            filepath.Join(configDir, "certs"),
+		WorkerID:           "worker-vn-01",
+		Port:               "7271",
+		MasterURL:          "https://localhost:7270",
+		AdvertiseAddress:   "localhost:7271",
+		ShutdownTimeout:    "10s",
+		MaxModuleBytes:     10 << 20,
+		MaxPayloadBytes:    1 << 20,
+		MaxOutputBytes:     1 << 20,
+		MaxConcurrentExecs: 4,
+		MaxCachedModules:   128,
+		MaxCacheBytes:      256 << 20,
+		ModuleCacheTTL:     "30m",
+	})
+	if err != nil {
+		t.Fatalf("InitWorker returned error: %v", err)
+	}
+
+	if !warningsContain(result.Warnings, "MASTER_URL points at a loopback host") {
+		t.Fatalf("expected MASTER_URL loopback warning, got %v", result.Warnings)
+	}
+	if !warningsContain(result.Warnings, "WORKER_ADVERTISE_ADDRESS points at a loopback host") {
+		t.Fatalf("expected advertise loopback warning, got %v", result.Warnings)
+	}
+}
+
+func TestInitWorkerNoLoopbackWarningForPrivateAddresses(t *testing.T) {
+	configDir := t.TempDir()
+
+	result, err := bootstrap.InitWorker(bootstrap.WorkerOptions{
+		ConfigDir:          configDir,
+		CertDir:            filepath.Join(configDir, "certs"),
+		WorkerID:           "worker-vn-01",
+		Port:               "7271",
+		MasterURL:          "https://10.0.0.4:7270",
+		AdvertiseAddress:   "10.0.0.5:7271",
+		ShutdownTimeout:    "10s",
+		MaxModuleBytes:     10 << 20,
+		MaxPayloadBytes:    1 << 20,
+		MaxOutputBytes:     1 << 20,
+		MaxConcurrentExecs: 4,
+		MaxCachedModules:   128,
+		MaxCacheBytes:      256 << 20,
+		ModuleCacheTTL:     "30m",
+	})
+	if err != nil {
+		t.Fatalf("InitWorker returned error: %v", err)
+	}
+
+	if warningsContain(result.Warnings, "loopback host") {
+		t.Fatalf("did not expect loopback warnings, got %v", result.Warnings)
+	}
+}
+
+func warningsContain(warnings []string, substring string) bool {
+	for _, warning := range warnings {
+		if strings.Contains(warning, substring) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func TestInitWorkerDefaultsAdvertiseAddressFromHostname(t *testing.T) {
 	configDir := t.TempDir()
 	certDir := filepath.Join(configDir, "certs")
@@ -270,7 +339,7 @@ func TestInitWorkerDefaultsAdvertiseAddressFromHostname(t *testing.T) {
 	env := readFile(t, result.ConfigPath)
 	assertContains(t, env, "WORKER_ADVERTISE_ADDRESS="+shared.DefaultWorkerAdvertiseAddress("9444")+"\n")
 	assertContains(t, env, "WORKER_AUTO_DETECT_LOCATION=true\n")
-	assertContains(t, env, "WORKER_LOCATION_PROVIDER_URL=https://ipapi.co/json/\n")
+	assertContains(t, env, "WORKER_LOCATION_PROVIDER_URL=https://ipapi.co/json/,https://ipinfo.io/json\n")
 	assertNotContains(t, env, "WORKER_LATITUDE=")
 	assertNotContains(t, env, "WORKER_LONGITUDE=")
 }

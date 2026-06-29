@@ -18,7 +18,16 @@ import (
 	"wasmcat/internal/shared"
 )
 
+// version is injected at build time via -ldflags "-X main.version=...".
+// It stays "dev" for plain `go build`/`go run`.
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		fmt.Printf("wasmcat-master %s\n", version)
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "init" {
 		if err := runInit(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "init failed: %v\n", err)

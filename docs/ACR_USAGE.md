@@ -2,6 +2,8 @@
 
 This project can fetch a private WASM module from Azure Container Registry when the execution request uses an ACR URL.
 
+To build a `.wasm` module and publish it to ACR as an OCI artifact with ORAS, see the Code-to-Node Pipeline section of [PRODUCTION_VM_DEPLOYMENT.md](PRODUCTION_VM_DEPLOYMENT.md). A dedicated GitHub Actions publishing workflow is planned but not yet committed.
+
 ## Current Support
 
 The current implementation supports OCI manifest URLs, for example:

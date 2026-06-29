@@ -10,6 +10,7 @@ The simplest production layout is:
 /usr/local/bin/wasmcat-master
 /usr/local/bin/wasmcat-worker
 /usr/local/bin/wasmcatctl
+/usr/local/bin/wasmcat-ui
 /etc/wasmcat/master.env
 /etc/wasmcat/worker.env
 /etc/wasmcat/certs/
@@ -33,12 +34,13 @@ VERSION="v0.1.0"
 BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
 ```
 
-Download the Linux master, Linux worker, operator CLI, systemd service files, and checksums:
+Download the Linux master, Linux worker, operator CLI, browser dashboard, systemd service files, and checksums:
 
 ```bash
 curl -LO "$BASE_URL/wasmcat-master-linux-amd64"
 curl -LO "$BASE_URL/wasmcat-worker-linux-amd64"
 curl -LO "$BASE_URL/wasmcatctl-linux-amd64"
+curl -LO "$BASE_URL/wasmcat-ui-linux-amd64"
 curl -LO "$BASE_URL/wasmcat-master.service"
 curl -LO "$BASE_URL/wasmcat-worker.service"
 curl -LO "$BASE_URL/checksums.txt"
@@ -50,7 +52,7 @@ Verify the downloaded files:
 sha256sum -c checksums.txt --ignore-missing
 ```
 
-Use only the binary required for the host role. A master host needs `wasmcat-master-linux-amd64`; a worker host needs `wasmcat-worker-linux-amd64`. Operator machines can install `wasmcatctl-linux-amd64` to avoid long mTLS `curl` commands.
+Use only the binary required for the host role. A master host needs `wasmcat-master-linux-amd64`; a worker host needs `wasmcat-worker-linux-amd64`. Operator machines can install `wasmcatctl-linux-amd64` to avoid long mTLS `curl` commands and `wasmcat-ui-linux-amd64` for a browser dashboard.
 
 ## Build From Source
 
@@ -80,9 +82,11 @@ Both scripts write release artifacts to `dist/`:
 dist/wasmcat-master-linux-amd64
 dist/wasmcat-worker-linux-amd64
 dist/wasmcatctl-linux-amd64
+dist/wasmcat-ui-linux-amd64
 dist/wasmcat-master-windows-amd64.exe
 dist/wasmcat-worker-windows-amd64.exe
 dist/wasmcatctl-windows-amd64.exe
+dist/wasmcat-ui-windows-amd64.exe
 dist/wasmcat-master.service
 dist/wasmcat-worker.service
 dist/wasmcat-master.env
@@ -99,6 +103,40 @@ VERSION=0.1.0 sh scripts/build.sh
 ```powershell
 .\scripts\build.ps1 -Version 0.1.0
 ```
+
+## Operator Dashboard
+
+`wasmcat-ui` is an optional browser console for operators. It uses the same config file as `wasmcatctl`; the browser talks to the local UI backend, and the backend calls the master over mTLS.
+
+Install the dashboard binary on an operator machine:
+
+```bash
+sudo install -m 0755 wasmcat-ui-linux-amd64 /usr/local/bin/wasmcat-ui
+```
+
+Create the shared CLI/UI config:
+
+```bash
+wasmcatctl config init \
+  --master https://master.example.com:7270 \
+  --ca /etc/wasmcat/certs/ca.crt \
+  --cert /etc/wasmcat/certs/worker-worker-vn-01.crt \
+  --key /etc/wasmcat/certs/worker-worker-vn-01.key
+```
+
+Start the dashboard:
+
+```bash
+wasmcat-ui --listen :7280
+```
+
+Open:
+
+```text
+http://localhost:7280
+```
+
+Keep the dashboard on a trusted operator machine or behind an authenticated network boundary. It can read the configured client private key path in order to call the master.
 
 ## Linux Master Install
 
@@ -337,9 +375,104 @@ go run ./cmd/worker
 
 This mode is for development only. Production should provide certificates through a controlled secret or configuration process and set `AUTO_GENERATE_CERTS=false`.
 
-## Upgrade
+## Install or Update With the Script
 
-Build or download the new release, replace the binary, and restart the service:
+`scripts/install-or-update.sh` automates first-time installs and in-place updates so you do not have to repeat the manual `install`/`restart` steps after every code change. It is safe to re-run.
+
+What it does for each selected component:
+
+- creates the `wasmcat` service user and `/etc/wasmcat` + `/var/lib/wasmcat` (master/worker roles), so installs never fail with `chown: invalid user`,
+- backs up the current binary as `<binary>.bak` before replacing it,
+- installs the new binary into `/usr/local/bin`,
+- shows the installed version and the new version,
+- optionally copies a certificate bundle (`--certs-from`) with explicit per-file permissions,
+- restarts only the relevant systemd service (`wasmcat-master` or `wasmcat-worker`),
+- automatically rolls that component back to `.bak` if the service fails to come back active.
+
+It never overwrites `/etc/wasmcat/*.env` or the SQLite job database, so configuration and durable jobs are preserved across updates. (`--certs-from` is the one exception: it intentionally writes the certs you point it at.)
+
+Build (or download) the binaries first, then run the script for the host role. The role can be positional or a `--role` flag:
+
+```bash
+# Build artifacts into ./dist on a build machine, then copy the repo or dist/ to the VM.
+sh scripts/build.sh
+
+# Master VM (positional role):
+sudo sh scripts/install-or-update.sh master --source ./dist
+
+# Worker VM:
+sudo sh scripts/install-or-update.sh worker --source ./dist
+
+# Master VM, also installing the cert bundle produced by gen-certs.sh:
+sudo sh scripts/install-or-update.sh master --source ./dist --certs-from /tmp/master-certs
+
+# Operator machine (no systemd services involved):
+sh scripts/install-or-update.sh ctl,ui --source ./dist --bin-dir "$HOME/.local/bin"
+```
+
+Install directly from a tagged GitHub release instead of a local `dist/` (checksums are verified when published):
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --version v0.1.0 --repo <owner>/<repo>
+```
+
+First-time install on a fresh VM can also drop the systemd unit file from the artifacts:
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --source ./dist --install-service
+# then provide /etc/wasmcat config + certs (see below) and:
+sudo systemctl enable --now wasmcat-master
+```
+
+Roll a bad update back to the previous binary and restart the service:
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --rollback
+```
+
+Preview every action without changing anything:
+
+```bash
+sudo sh scripts/install-or-update.sh --role master --source ./dist --dry-run
+```
+
+Run `sh scripts/install-or-update.sh --help` for the full option list.
+
+## Generate mTLS Certificates
+
+`scripts/gen-certs.sh` generates a complete cluster bundle from a single CA, which avoids the most common mTLS setup failures (CA mismatch between nodes, worker certificates missing `clientAuth`, master certificates missing the private IP in their SAN, and worker certificate filenames not matching `WORKER_ID`).
+
+Run it on an operator machine (not on the nodes). The CA private key stays in the PKI directory (`./wasmcat-pki` by default) and is never copied to a node:
+
+```bash
+sh scripts/gen-certs.sh master --ip MASTER_PRIVATE_IP --dns master.internal
+sh scripts/gen-certs.sh worker --id worker-vn-01 --ip WORKER_PRIVATE_IP
+sh scripts/gen-certs.sh operator --id wasmcat-operator
+```
+
+This writes per-node bundles under `./wasmcat-certs/`:
+
+```text
+wasmcat-certs/master/                 ca.crt master.crt master.key
+wasmcat-certs/worker-worker-vn-01/    ca.crt worker-worker-vn-01.crt worker-worker-vn-01.key
+wasmcat-certs/operator/               ca.crt operator.crt operator.key
+```
+
+Copy each bundle to its node and install it with the cert step of the install script (which sets ownership and per-file permissions):
+
+```bash
+scp -r wasmcat-certs/master azureuser@MASTER_PRIVATE_IP:/tmp/master-certs
+# on the master VM:
+sudo sh scripts/install-or-update.sh master --source ./dist --certs-from /tmp/master-certs
+```
+
+Keep `wasmcat-pki/` (the CA) safe and offline. To add a worker later, run `gen-certs.sh worker --id NEW_ID --ip NEW_IP` against the same PKI directory; it reuses the existing CA so every node still trusts one authority. Verify the shared CA fingerprint at any time with `sh scripts/gen-certs.sh fingerprint`.
+
+If the master sets `EXECUTE_CLIENT_ALLOWLIST`, add the operator identity (the operator certificate common name, e.g. `wasmcat-operator`) to it. See [EXECUTION_AUTHORIZATION.md](EXECUTION_AUTHORIZATION.md).
+
+## Manual Upgrade
+
+The script is preferred, but the manual path still works. Build or download the new release, replace the binary, and restart the service:
 
 ```bash
 sudo install -m 0755 wasmcat-master-linux-amd64 /usr/local/bin/wasmcat-master
@@ -354,3 +487,16 @@ sudo systemctl restart wasmcat-worker
 ```
 
 Keep `/etc/wasmcat/*.env` and `/etc/wasmcat/certs` outside the release artifact so upgrades do not overwrite host configuration or secrets.
+
+## Check Installed Versions
+
+Each binary reports its build version, which the update script uses to show before/after versions:
+
+```bash
+wasmcat-master version
+wasmcat-worker version
+wasmcatctl version
+wasmcat-ui --version
+```
+
+A plain `go build`/`go run` reports `dev`; release builds report the tag passed through `VERSION=...`.

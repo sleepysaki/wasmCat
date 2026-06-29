@@ -46,13 +46,13 @@ Byte and count limits must be greater than zero. CPU scheduling thresholds must 
 | `WORKER_LATITUDE` | unset | Optional worker latitude override used by the scheduler. Must be set together with `WORKER_LONGITUDE`. |
 | `WORKER_LONGITUDE` | unset | Optional worker longitude override used by the scheduler. Must be set together with `WORKER_LATITUDE`. |
 | `WORKER_AUTO_DETECT_LOCATION` | `true` | Detect worker VM coordinates at startup when explicit worker coordinates are absent. |
-| `WORKER_LOCATION_PROVIDER_URL` | `https://ipapi.co/json/` | HTTP JSON endpoint used for worker IP-based location detection. |
+| `WORKER_LOCATION_PROVIDER_URL` | `https://ipapi.co/json/,https://ipinfo.io/json` | Comma-separated HTTP JSON endpoint(s) for worker IP-based location detection. The worker tries each in order and uses the first that succeeds, so one rate-limited provider does not block startup. |
 | `CERT_DIR` | `./certs` | Directory containing `ca.crt`, `worker-<id>.crt`, and `worker-<id>.key`. |
 | `HEARTBEAT_INTERVAL` | `5s` | Worker registration and heartbeat interval. |
 
 Worker registration and heartbeat require the mTLS client certificate identity to match `WORKER_ID`. The master accepts a certificate common name of `wasmcat-worker-<WORKER_ID>` or a DNS SAN containing either `<WORKER_ID>` or `wasmcat-worker-<WORKER_ID>`.
 
-Worker location is resolved before telemetry starts. If `WORKER_LATITUDE` and `WORKER_LONGITUDE` are set, those values are registered with the master. If both are omitted and `WORKER_AUTO_DETECT_LOCATION=true`, the worker queries `WORKER_LOCATION_PROVIDER_URL` and registers the detected coordinates. The provider response may use `latitude`/`longitude`, `lat`/`lon`, or `loc: "lat,lon"`.
+Worker location is resolved before telemetry starts. If `WORKER_LATITUDE` and `WORKER_LONGITUDE` are set, those values are registered with the master. If both are omitted and `WORKER_AUTO_DETECT_LOCATION=true`, the worker queries the providers in `WORKER_LOCATION_PROVIDER_URL` (in order, falling back to the next on failure) and registers the first detected coordinates. The provider response may use `latitude`/`longitude`, `lat`/`lon`, or `loc: "lat,lon"`. For production, prefer explicit coordinates or an internal/Azure-metadata region map over public IP geolocation.
 
 Set `WORKER_ADVERTISE_ADDRESS` explicitly in production when the OS hostname is not resolvable from the master, such as private IP deployments, split DNS, NAT, or custom service discovery. Use `localhost:<port>` only for same-host development.
 
