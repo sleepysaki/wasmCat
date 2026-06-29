@@ -53,8 +53,9 @@ Actions:
 Options:
   --pki-dir DIR   CA working directory holding ca.crt and ca.key (default ./wasmcat-pki).
   --out DIR       Output directory for per-node bundles (default ./wasmcat-certs).
-  --ip IP         IP address to add to the certificate SAN.
-  --dns NAME      Extra DNS name to add to the certificate SAN.
+  --ip IP         IP address(es) to add to the certificate SAN (comma-separated
+                  for several, e.g. a master on both private and public IPs).
+  --dns NAME      DNS name(s) to add to the certificate SAN (comma-separated).
   --id VALUE      Worker ID (worker) or operator identity (operator).
   -h, --help      Show this help.
 
@@ -101,6 +102,27 @@ ensure_ca() {
     -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
   chmod 0600 "$CA_KEY"
   log "CA created: $CA_CRT"
+}
+
+# csv_to_san PREFIX LIST -> "PREFIX:a,PREFIX:b" from a comma-separated LIST.
+# Lets --ip and --dns each carry several values, e.g. a master reachable on both
+# a private and a public address.
+csv_to_san() {
+  prefix="$1"
+  out=""
+  oldifs="$IFS"
+  IFS=','
+  for item in $2; do
+    item="$(printf '%s' "$item" | tr -d '[:space:]')"
+    [ -n "$item" ] || continue
+    if [ -z "$out" ]; then
+      out="$prefix:$item"
+    else
+      out="$out,$prefix:$item"
+    fi
+  done
+  IFS="$oldifs"
+  printf '%s' "$out"
 }
 
 # sign_leaf CN OUT_BASE SAN_LIST
@@ -173,8 +195,9 @@ case "$ACTION" in
     ensure_ca
     bundle="$OUT_DIR/master"
     mkdir -p "$bundle"
-    san="DNS:localhost,IP:127.0.0.1,IP:$IP"
-    [ -n "$DNS" ] && san="$san,DNS:$DNS"
+    san="DNS:localhost,IP:127.0.0.1"
+    [ -n "$IP" ] && san="$san,$(csv_to_san IP "$IP")"
+    [ -n "$DNS" ] && san="$san,$(csv_to_san DNS "$DNS")"
     sign_leaf "wasmcat-master" "$bundle/master" "$san"
     cp "$CA_CRT" "$bundle/ca.crt"
     log "master bundle ready: $bundle (ca.crt master.crt master.key)"
@@ -189,8 +212,9 @@ case "$ACTION" in
     mkdir -p "$bundle"
     # CN and SANs both carry the worker identity so the master's identity check
     # accepts the cert, and the IP SAN lets the master verify the TLS server.
-    san="DNS:localhost,DNS:$ID,DNS:wasmcat-worker-$ID,IP:127.0.0.1,IP:$IP"
-    [ -n "$DNS" ] && san="$san,DNS:$DNS"
+    san="DNS:localhost,DNS:$ID,DNS:wasmcat-worker-$ID,IP:127.0.0.1"
+    [ -n "$IP" ] && san="$san,$(csv_to_san IP "$IP")"
+    [ -n "$DNS" ] && san="$san,$(csv_to_san DNS "$DNS")"
     sign_leaf "wasmcat-worker-$ID" "$bundle/worker-$ID" "$san"
     cp "$CA_CRT" "$bundle/ca.crt"
     log "worker bundle ready: $bundle (ca.crt worker-$ID.crt worker-$ID.key)"
