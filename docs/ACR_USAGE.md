@@ -2,7 +2,7 @@
 
 This project can fetch a private WASM module from Azure Container Registry when the execution request uses an ACR URL.
 
-Use [WASM_MODULE_PIPELINE.md](WASM_MODULE_PIPELINE.md) to build WABT `.wat` modules in GitHub Actions and publish the resulting `.wasm` files to ACR as OCI artifacts.
+To build a `.wasm` module and publish it to ACR as an OCI artifact with ORAS, see the Code-to-Node Pipeline section of [PRODUCTION_VM_DEPLOYMENT.md](PRODUCTION_VM_DEPLOYMENT.md). A dedicated GitHub Actions publishing workflow is planned but not yet committed.
 
 ## Current Support
 

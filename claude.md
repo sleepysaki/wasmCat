@@ -327,20 +327,13 @@ This path is more reliable under restarts or unstable clients because the reques
 - Worker auto-location accepts a comma-separated `WORKER_LOCATION_PROVIDER_URL` and falls back across providers (default `https://ipapi.co/json/,https://ipinfo.io/json`); `wasmcat-worker init` warns when `MASTER_URL`/`WORKER_ADVERTISE_ADDRESS` use a loopback host.
 - Optional WASI execution mode beside the custom ABI: requests carry an `abi` field (`""` auto-detect, `wasmcat`, `wasi`); `wasmcatctl execute/jobs create --abi` and the dashboard ABI selector expose it. Standard `wasip1` modules run via stdin/stdout using wazero's `wasi_snapshot_preview1`.
 - Separate `tests/` tree covering unit, integration, and smoke tests.
-- Production VM deployment docs, node setup troubleshooting, ACR usage docs, and WABT-to-ACR module pipeline docs.
-- GitHub workflow to publish WABT `.wat` modules as `.wasm` OCI artifacts to ACR.
+- Production VM deployment docs, node setup troubleshooting, and ACR usage docs. Module publishing to ACR is documented as manual ORAS steps in `docs/PRODUCTION_VM_DEPLOYMENT.md`.
+- `scripts/demo.sh` capability demo runner plus `docs/DEMO.md`.
+- `.gitattributes` enforces LF for shell/Go files so scripts stay runnable on Linux and gofmt is consistent across platforms.
 
-### Current Uncommitted Work To Notice
+### Not Yet Built (Despite Earlier Notes)
 
-At the time this file was generated, the working tree included uncommitted additions for the WABT module publishing pipeline:
-
-- `.github/workflows/publish-wasm-modules.yml`
-- `docs/WASM_MODULE_PIPELINE.md`
-- `examples/wasm-modules/echo/echo.wat`
-- updates to `README.md`
-- updates to `docs/ACR_USAGE.md`
-
-Do not assume these files have been committed unless `git status` confirms it.
+A WABT-to-ACR GitHub Actions publishing pipeline is **not** implemented. The following were referenced in earlier drafts but do not exist in the tree: `.github/workflows/publish-wasm-modules.yml`, `docs/WASM_MODULE_PIPELINE.md`, and `examples/wasm-modules/`. Building them is a candidate next step (see below). There is also an inert `.github/workflow/sync-to-ado.yml` in a misnamed directory (`workflow`, singular) that GitHub Actions never runs.
 
 ### Immediate Engineering Next Steps
 
