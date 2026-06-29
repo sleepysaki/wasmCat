@@ -290,7 +290,19 @@ Execution client authorization is optional but supported. If `EXECUTE_CLIENT_ALL
 
 Module source policy is another security-related mechanism. The master can enforce an allowed host list and can require module digests. The host allowlist reduces the risk of arbitrary remote module downloads. The digest requirement reduces content drift risk by forcing requests to identify expected module bytes.
 
-## 3.11 Testing Method
+## 3.11 Bootstrap and Operability Method
+
+A practical edge orchestrator must be straightforward to install, secure, and update on a plain virtual machine without a container runtime. wasmCat addresses this through bootstrap subcommands and a small set of POSIX shell scripts that together make node setup reproducible rather than manual.
+
+Each binary provides an `init` subcommand. `wasmcat-master init` and `wasmcat-worker init` generate the environment configuration file and certificate directory for a node, fill in validated defaults, and, in development, can generate a local certificate bundle. The worker initializer additionally emits warnings when `MASTER_URL` or `WORKER_ADVERTISE_ADDRESS` resolve to a loopback host, because that is a common multi-VM misconfiguration in which a worker unintentionally points at itself rather than at the master.
+
+Certificate provisioning is handled by `scripts/gen-certs.sh`, which generates a complete mutual-TLS bundle from a single certificate authority. It issues master, worker, and operator certificates with the correct subject alternative names, the `serverAuth` and `clientAuth` extended key usages required by the cluster, and worker certificate filenames that match each `WORKER_ID`. The certificate authority private key is kept in a separate working directory and is never copied onto a node. This design directly prevents the most frequent setup failures observed during deployment: nodes trusting different authorities, worker certificates missing client authentication, master certificates lacking the deployment IP in their SAN, and certificate filenames that do not match the worker identity.
+
+Installation and updates are handled by `scripts/install-or-update.sh`, which is safe to re-run. For a given role -- master, worker, operator CLI, or dashboard -- it creates the dedicated service user and directories, installs the binaries, and restarts only the relevant systemd service. Before replacing a binary it stores a backup with a `.bak` suffix, and if the restarted service does not return to an active state it automatically rolls back to that backup. The script never overwrites host configuration: the environment files under `/etc/wasmcat`, the certificate directory, and the SQLite job database are preserved across updates, so an upgrade changes only executable code. It can install from a locally built `dist/` directory or download a tagged release and verify it against published checksums, and each binary exposes a `version` subcommand so an operator can confirm the installed and incoming versions before and after an update.
+
+Finally, `scripts/build.sh` validates the local Go toolchain against the version declared in `go.mod` and fails with an explicit message when the toolchain is too old, rather than producing the confusing `invalid go version` error emitted by an older compiler. Together these mechanisms support the thesis goal of reproducible operation: a node can be installed, secured, and later upgraded through documented commands, and the same procedures are exercised by the project's tests and continuous-integration workflow.
+
+## 3.12 Testing Method
 
 Tests are stored in a separate `tests/` tree, grouped by area. This follows the project's contributor guidance and keeps test files out of implementation packages. Unit tests cover individual packages such as config loading, request ID validation, scheduler behavior, registry behavior, module policy, ACR manifest parsing, ACR token caching, worker limits, module cache lifecycle, metrics, and error contracts. Integration tests cover master-worker execution behavior. Smoke tests exercise process-level behavior.
 
@@ -530,6 +542,21 @@ wasmcat-worker init \
   --advertise-address worker-us-01.example.com:7271 \
   --config-dir /etc/wasmcat \
   --cert-dir /etc/wasmcat/certs
+```
+
+A node can be installed or updated in place, preserving its configuration, certificates, and job database, with:
+
+```bash
+sudo sh scripts/install-or-update.sh master --source ./dist
+sudo sh scripts/install-or-update.sh worker --source ./dist
+```
+
+A consistent mutual-TLS bundle can be generated from a single certificate authority with:
+
+```bash
+sh scripts/gen-certs.sh master --ip MASTER_PRIVATE_IP
+sh scripts/gen-certs.sh worker --id worker-us-01 --ip WORKER_PRIVATE_IP
+sh scripts/gen-certs.sh operator --id wasmcat-operator
 ```
 
 ## Appendix D: Example Execution Request
