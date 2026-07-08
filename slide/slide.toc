@@ -1,0 +1,5 @@
+\beamer@sectionintoc {1}{Introduction}{3}{0}{1}
+\beamer@sectionintoc {2}{Method --- System Design}{6}{0}{2}
+\beamer@sectionintoc {3}{Process --- Execution Lifecycle}{12}{0}{3}
+\beamer@sectionintoc {4}{Results}{15}{0}{4}
+\beamer@sectionintoc {5}{Conclusion}{18}{0}{5}

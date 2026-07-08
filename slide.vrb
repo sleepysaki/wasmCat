@@ -1,0 +1,29 @@
+\frametitle{Two Execution Modes: Custom ABI and WASI}
+
+	\begin{columns}[t]
+		\begin{column}{0.48\textwidth}
+			\textbf{wasmCat ABI} (lightweight)
+			\begin{itemize}
+				\item Module exports \texttt{memory}, \texttt{malloc}, \texttt{run}
+				\item Host writes payload into linear memory, calls \texttt{run(ptr, len)}
+				\item Returns one packed \texttt{uint64}:
+			\end{itemize}
+			\begin{verbatim}
+high 32 bits = output pointer
+low  32 bits = output length
+			\end{verbatim}
+		\end{column}
+		\begin{column}{0.48\textwidth}
+			\textbf{WASI mode} (standard \texttt{wasip1})
+			\begin{itemize}
+				\item Module exports \texttt{\_start}; payload on \textbf{stdin}, result on \textbf{stdout}, exit code 0 = success
+				\item Runs unmodified modules from Rust, Go, TinyGo, C, \ldots
+				\item \texttt{wasi\_snapshot\_preview1} provided by wazero
+			\end{itemize}
+		\end{column}
+	\end{columns}
+
+	\bigskip
+	\begin{block}{Auto-detection}
+		Request field \texttt{abi} $\in$ \{\texttt{""}, \texttt{wasmcat}, \texttt{wasi}\}. When empty: exports \texttt{run} $\Rightarrow$ custom ABI; exports \texttt{\_start} $\Rightarrow$ WASI. Both modes share the digest-aware cache and per-request isolation.
+	\end{block}

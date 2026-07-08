@@ -1,0 +1,29 @@
+\frametitle{Synchronous Execution: Input $\rightarrow$ Process $\rightarrow$ Output}
+	\begin{columns}[t]
+		\begin{column}{0.46\textwidth}
+			\textbf{Pipeline}
+			\begin{enumerate}
+				\item Validate + idempotency (\texttt{request\_id})
+				\item Resolve ACR (if needed)
+				\item Scheduler $\rightarrow$ nearest worker
+				\item \texttt{/invoke} over mTLS
+				\item Worker: fetch/compile, run, read output
+			\end{enumerate}
+		\end{column}
+		\begin{column}{0.54\textwidth}
+			\textbf{Input}
+\begin{lstlisting}
+{ "request_id":"req_demo_001",
+  "module_name":"jsonfmt",
+  "payload":"{\"b\":2,\"a\":1}",
+  "user_lat":1.29, "user_lon":103.85 }
+\end{lstlisting}
+			\textbf{Output}
+\begin{lstlisting}
+{ "request_id":"req_demo_001",
+  "result":"{\n \"a\":1,\n \"b\":2\n}",
+  "execution_time_ms":2.932,
+  "executed_on_node_id":"worker-vn-01" }
+\end{lstlisting}
+		\end{column}
+	\end{columns}
