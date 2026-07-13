@@ -43,9 +43,11 @@
 %----------------------------------------------------------------------------------------
 
 \title[wasmCat]{Geo-Aware WebAssembly (WASM)\\Serverless Orchestrator}
-\subtitle{Bachelor Thesis Defense}
-\author[Cao Trần Khánh Linh]{Cao Trần Khánh Linh --- 23BI14252}
+% \subtitle{Bachelor Thesis Defense}
+\author[Cao Trần Khánh Linh]{Cao Trần Khánh Linh - 23BI14252}
 \institute[USTH]{University of Science and Technology of Hanoi \\ Department of Information and Communication Technology \\ \smallskip \textit{External Supervisor: Eng. Trần Tuấn Anh \quad Internal Supervisor: Assoc. Prof. Trần Giang Sơn}}
+
+\date{July 13, 2026}
 
 \begin{document}
 
@@ -68,7 +70,7 @@
 \section{Introduction}
 %========================================================================
 
-%------------------------------------------------ 3. Context
+%3. Context
 \begin{frame}
 	\frametitle{Context}
 	\begin{columns}[t]
@@ -83,21 +85,19 @@
 		\begin{column}{0.5\textwidth}
 			\textbf{Serverless}
 			\begin{itemize}
-				\item Submit \emph{functions}, not servers
+				\item Submit \emph{prebuilt functions}, not servers
 				\item Platform picks node, runs, returns
-				\item Never pick a node by hand
+				\item Developers never pick worker manually
 			\end{itemize}
 		\end{column}
 	\end{columns}
 	\bigskip
-	\begin{block}{wasmCat}
-		Native Go master--worker orchestrator running WebAssembly functions on geo-distributed edge workers --- \textbf{no container runtime}.
-	\end{block}
+	\textbf{wasmCat}: Native Go master-worker orchestrator running WebAssembly functions on geo-distributed edge workers with \textbf{no container runtime}.
 \end{frame}
 
-%------------------------------------------------ 4. Why Wasm not containers
+%4. Why Wasm not containers
 \begin{frame}
-	\frametitle{Why WebAssembly, not Containers?}
+	\frametitle{Why WebAssembly?}
 	\begin{columns}[t]
 		\begin{column}{0.5\textwidth}
 			\textbf{Container overhead}
@@ -113,70 +113,68 @@
 			\begin{itemize}
 				\item One \texttt{.wasm}, any host
 				\item Sandbox: linear memory only
-				\item Compile once, instantiate per request in $\mu$s
+				\item Compile once, instantiate per request 
 				\item Pure-Go runtime, \emph{embedded}
 			\end{itemize}
 		\end{column}
 	\end{columns}
 	\bigskip
-	\begin{alertblock}{Gap}
-		Edge functions need: fast sandboxed startup + minimal node deps + \textbf{location-aware} placement.
-	\end{alertblock}
+	\textbf{=>} Edge functions need fast startup + minimal dependencies + \textbf{location-aware} placement.
 \end{frame}
 
-%------------------------------------------------ 5. Contributions
+%5. Contributions
 \begin{frame}
 	\frametitle{Contributions}
 	\begin{enumerate}
-		\item Go-native master--worker orchestrator (control / data plane)
-		\item Capacity-aware \textbf{geo-routing} (Haversine)
+		\item Go-native master-worker orchestrator
+		\item Capacity-aware \textbf{geo-routing} with Haversine formula 
 		\item Embedded \textbf{wazero}: 2 ABIs, digest-aware cache, strict limits
-		\item \textbf{Security}: mTLS + certificate-bound identity, digest verification
-		\item \textbf{Reliability}: durable SQLite jobs, idempotency, recovery
+		\item \textbf{Security}: mTLS, certificate-bound identity, digest verification
+		\item \textbf{Reliability}: durable SQLite jobs, idempotency
 		\item \textbf{Tooling}: CLI, web dashboard, JIT provisioning from Azure ACR
 	\end{enumerate}
 \end{frame}
 
 %========================================================================
-\section{Method --- System Design}
+\section{Architectural Design}
 %========================================================================
 
-%------------------------------------------------ 6. Architecture
+%6. Architecture
 \begin{frame}
 	\frametitle{System Architecture}
 	\begin{figure}
 		\includegraphics[height=0.72\textheight]{architecture_diagram.png}
-		\caption{Master and workers over mTLS: gateway, registry, geo-scheduler, dispatcher, ACR resolver, SQLite jobs.}
+		% \caption{Master and workers over mTLS: gateway, registry, geo-scheduler, dispatcher, ACR resolver, SQLite jobs.}
 	\end{figure}
 \end{frame}
 
-%------------------------------------------------ 7. INPUT / OUTPUT data model  (KEY)
+%7. INPUT / OUTPUT data model  (KEY)
 \begin{frame}[fragile]
 	\frametitle{Data Model: Input $\rightarrow$ Output}
 	\begin{columns}[t]
 		\begin{column}{0.5\textwidth}
-			\textbf{INPUT --- \texttt{ExecutionRequest}}
+			\textbf{INPUT (\texttt{ExecutionRequest})}
 \begin{lstlisting}
 struct {
-  RequestID   string   // idempotency key
-  ModuleName  string
-  Payload     string   // JSON / raw
-  ModuleRegistryURL string
-  ModuleDigest      string  // sha256:<hex>
-  UserLat     float64  // for Haversine
-  UserLon     float64
+  RequestID          string
+  ModuleName         string
+  Payload            string
+  ModuleRegistryURL  string
+  ModuleDigest       string
+  UserLat            float64
+  UserLon            float64
 }
 \end{lstlisting}
 		\end{column}
 		\begin{column}{0.5\textwidth}
-			\textbf{OUTPUT --- \texttt{ExecutionResponse}}
+			\textbf{OUTPUT (\texttt{ExecutionResponse})}
 \begin{lstlisting}
 struct {
   RequestID        string
-  Result           string  // Wasm output
+  Result           string  
   ExecutionTimeMs  float64
-  ExecutedOnNodeID string  // which worker
-  Error            string  // if failed
+  ExecutedOnNodeID string  
+  Error            string  
 }
 \end{lstlisting}
 		\end{column}
@@ -187,46 +185,42 @@ struct {
 	\end{center}
 \end{frame}
 
-%------------------------------------------------ 8. Worker model  (KEY)
+%8. Worker model  (KEY)
 \begin{frame}[fragile]
 	\frametitle{Worker Model \& Registry}
 	\begin{columns}[t]
 		\begin{column}{0.52\textwidth}
-			\textbf{\texttt{WorkerNode} (registry entry)}
+			\textbf{One worker = one \texttt{WorkerNode}}
 \begin{lstlisting}
 struct {
   ID        string
   IPAddress string
   Latitude  float64
   Longitude float64
-  CPUFree   float64   // %
+  CPUFree   float64   
   RAMFreeMB float64
   LastSeen  time.Time
-  State     string    // ready|draining
+  State     string    
 }
-\end{lstlisting}
-			\textbf{\texttt{Heartbeat} (every 5\,s)}
-\begin{lstlisting}
-struct { NodeID string
-  CPUFree float64; RAMFreeMB float64 }
 \end{lstlisting}
 		\end{column}
 		\begin{column}{0.46\textwidth}
-			\begin{block}{Registry design}
-				\begin{itemize}
-					\item \texttt{map[string]WorkerNode}
-					\item \texttt{sync.RWMutex}: many reads, rare writes
-					\item Static metadata at register; only CPU/RAM in heartbeats
-					\item Stale workers evicted by a background loop
-				\end{itemize}
-			\end{block}
+			\textbf{Registry = \texttt{map[ID]WorkerNode}}
+			\begin{itemize}
+				\item In memory, behind a \texttt{sync.RWMutex}: many reads, rare writes
+				\item \textbf{Heartbeat} every 5\,s updates only CPU / RAM
+				\item Coordinates set once, at registration
+				\item Background loop evicts workers that go silent
+			\end{itemize}
+			\medskip
+			% {\small\itshape In memory on purpose: liveness is real-time state, not durable data --- durability is for jobs.}
 		\end{column}
 	\end{columns}
 \end{frame}
 
-%------------------------------------------------ 9. Scheduling method
+%9. Scheduling method
 \begin{frame}
-	\frametitle{Geo-Aware, Capacity-Aware Scheduling}
+	\frametitle{Scheduling}
 	\begin{columns}[c]
 		\begin{column}{0.5\textwidth}
 			\textbf{Two stages}
@@ -249,14 +243,14 @@ struct { NodeID string
 		\end{column}
 	\end{columns}
 	\bigskip
-	\begin{alertblock}{Honest scope}
-		Distance is a \emph{proxy} for latency. Measured RTT + cache locality = future work.
-	\end{alertblock}
+
+		{\small\itshape Shorter distance usually lowers latency, but the network path and congestion also matter.}
+
 \end{frame}
 
-%------------------------------------------------ 10. ABIs — byte-level I/O  (KEY)
+% 10. ABIs — byte-level I/O  (KEY)
 \begin{frame}[fragile]
-	\frametitle{Two Execution Modes --- Byte-level I/O}
+	\frametitle{Execution Modes}
 	\begin{columns}[t]
 		\begin{column}{0.52\textwidth}
 			\textbf{wasmCat ABI} (custom)
@@ -285,26 +279,26 @@ stdout -> result
 	\end{block}
 \end{frame}
 
-%------------------------------------------------ 11. Security method
+% 11. Security method
 \begin{frame}
 	\frametitle{Security Model}
 	\begin{enumerate}
-		\item \textbf{mTLS everywhere} --- verified client cert before any handler
-		\item \textbf{Certificate-bound identity} --- claimed worker ID must equal cert CN / DNS SAN $\Rightarrow$ no impersonation
-		\item \textbf{Module integrity} --- SHA-256 verified before compile; digest is part of cache key
-		\item \textbf{Scoped credentials} --- ACR token: repository-scoped, pull-only, short-lived
+		\item \textbf{mTLS}: Verified client cert before any handler
+		\item \textbf{Certificate-bound identity}: Claimed worker ID must equal cert CN / DNS SAN $\Rightarrow$ no impersonation
+		\item \textbf{Module integrity}: Verified SHA-256 hash before compile; digest is part of cache key
+		\item \textbf{Scoped credentials}: ACR token: repository-scoped, pull-only, short-lived
 	\end{enumerate}
-	\bigskip
-	\begin{block}{Boundary preserved}
-		Dashboard never talks to the master from the browser --- a local backend reuses the same mTLS client. Private keys never leave the host.
-	\end{block}
+	% \bigskip
+	% \begin{block}{Boundary preserved}
+	% 	Dashboard never talks to the master from the browser, but a local backend reuses the same mTLS client. Private keys never leave the host.
+	% \end{block}
 \end{frame}
 
 %========================================================================
-\section{Process --- Execution Lifecycle}
+\section{Execution Lifecycle}
 %========================================================================
 
-%------------------------------------------------ 12. Synchronous execution process (I/O concrete)
+% 12. Synchronous execution process (I/O concrete)
 \begin{frame}[fragile]
 	\frametitle{Synchronous Execution: Input $\rightarrow$ Process $\rightarrow$ Output}
 	\begin{columns}[t]
@@ -337,7 +331,7 @@ stdout -> result
 	\end{columns}
 \end{frame}
 
-%------------------------------------------------ 13. Durable job process + state machine
+% 13. Durable job process + state machine
 \begin{frame}
 	\frametitle{Durable Job Process \& State Machine}
 	\begin{columns}[c]
@@ -354,24 +348,24 @@ stdout -> result
 		\begin{column}{0.48\textwidth}
 			\begin{figure}
 				\includegraphics[width=\linewidth]{state_machine_diagram.png}
-				\caption{Job lifecycle.}
+				\caption{Job lifecycle}
 			\end{figure}
 		\end{column}
 	\end{columns}
 \end{frame}
 
-%------------------------------------------------ 14. ACR JIT provisioning process
+% 14. ACR JIT provisioning process
 \begin{frame}
 	\frametitle{JIT Module Provisioning from Azure ACR}
 	\begin{enumerate}
-		\item Detect \texttt{*.azurecr.io} reference
-		\item Master: \texttt{DefaultAzureCredential} $\rightarrow$ token \texttt{repository:<name>:pull}
-		\item Fetch OCI manifest $\rightarrow$ pick \texttt{application/wasm} layer $\rightarrow$ blob URL
+		\item Detect *.azurecr.io reference
+		\item Master: DefaultAzureCredential $\rightarrow$ token repository:<name>:pull
+		\item Fetch OCI manifest $\rightarrow$ pick application/wasm layer $\rightarrow$ blob URL
 		\item Forward \{blob URL + bearer + digest\} to worker $\rightarrow$ download \& compile
 	\end{enumerate}
 	\bigskip
-	\begin{block}{Security property}
-		Workers hold \textbf{no} Azure credentials --- only a per-request, repository-scoped, pull-only token. Modules published as OCI artifacts with \textbf{ORAS}.
+	\begin{block}{Property}
+		Workers hold \textbf{no} Azure credentials, only a per-request, repository-scoped, pull-only token. Modules published as OCI artifacts with \textbf{ORAS}.
 	\end{block}
 \end{frame}
 
@@ -379,18 +373,19 @@ stdout -> result
 \section{Results}
 %========================================================================
 
-%------------------------------------------------ 15. Result 1: geo-routing
+% 15. Result 1: geo-routing
 \begin{frame}
-	\frametitle{Result 1 --- Geo-Routing Works End to End}
+	\frametitle{Result 1: Geo-routing}
 	\begin{table}
 		\centering
-		\begin{tabular}{l l l}
-			\toprule
+		\begin{tabular}{|l|l|l|}
+			\hline
 			\textbf{Client coords} & \textbf{Location} & \textbf{Selected worker}\\
-			\midrule
+			\hline
 			1.29, 103.85 & Singapore & worker-vn-01 (SEA) \\
+			\hline
 			47.67, $-$122.12 & Seattle & worker-west-us-01 (US) \\
-			\bottomrule
+			\hline
 		\end{tabular}
 		\caption{Same request, different coordinates $\rightarrow$ nearest eligible worker.}
 	\end{table}
@@ -400,37 +395,38 @@ stdout -> result
 	\end{itemize}
 \end{frame}
 
-%------------------------------------------------ 16. Result 2: latency
+% 16. Result 2: latency
 \begin{frame}
-	\frametitle{Result 2 --- Cache Dominates Latency}
+	\frametitle{Result 2: Latency}
 	\begin{table}
 		\centering
-		\begin{tabular}{l r r}
-			\toprule
+		\begin{tabular}{|l|r|r|}
+			\hline
 			\textbf{Module source} & \textbf{Cold (ms)} & \textbf{Warm (ms)}\\
-			\midrule
+			\hline
 			Direct HTTP URL & 2135.559 & 7.529 \\
+			\hline
 			Azure ACR (OCI) & 2372.821 & 2.932 \\
-			\bottomrule
+			\hline
 		\end{tabular}
 		\caption{Worker \texttt{execution\_time\_ms} by source and cache state.}
 	\end{table}
 	\begin{itemize}
-		\item Cold $\approx$ download + wazero compile --- paid \textbf{once} per version per worker
-		\item Warm $\approx$ fresh instance from cache --- a few ms
+		\item Cold $\approx$ download + wazero compile: paid \textbf{once} per version per worker
+		\item Warm $\approx$ fresh instance from cache: a few ms
 		\item No image pull / namespace setup on any request
 	\end{itemize}
 \end{frame}
 
-%------------------------------------------------ 17. Limitations
+% 17. Limitations
 \begin{frame}
 	\frametitle{Limitations}
 	\begin{enumerate}
-		\item \textbf{Single master} --- local SQLite recovery, \emph{not} HA
-		\item \textbf{In-memory registry} --- membership rebuilt from heartbeats after restart
-		\item \textbf{Haversine $\neq$ RTT} --- no congestion / cache-locality awareness
-		\item \textbf{Coarse isolation} --- host-level CPU/RAM, no per-invocation cgroup / fuel
-		\item \textbf{Workload} --- stateless functions only (no sockets / FS beyond \texttt{wasip1})
+		\item \textbf{Single master}: local SQLite recovery, \emph{not} HA
+		\item \textbf{In-memory registry}: membership rebuilt from heartbeats after restart
+		\item \textbf{Haversine $\neq$ RTT}: no congestion / cache-locality awareness
+		\item \textbf{Coarse isolation}: host-level CPU/RAM, no per-invocation cgroup / fuel
+		\item \textbf{Workload}: stateless functions only (no sockets / FS beyond \texttt{wasip1})
 	\end{enumerate}
 \end{frame}
 
@@ -438,28 +434,26 @@ stdout -> result
 \section{Conclusion}
 %========================================================================
 
-%------------------------------------------------ 18. Conclusion
+% 18. Conclusion
 \begin{frame}
 	\frametitle{Conclusion \& Future Work}
 	\begin{block}{Demonstrated}
-		A compact native Go system: capacity- \& location-aware scheduling, JIT ACR provisioning, mTLS, durable idempotent jobs --- validated on a two-region Azure deployment.
+		A compact native Go system: capacity- \& location-aware scheduling, JIT ACR provisioning, mTLS, durable idempotent jobs on a two-region Azure VM deployment.
 	\end{block}
 	\bigskip
 	\textbf{Future work}
 	\begin{itemize}
-		\item HA control plane: leader election + external job store
+		\item High Availability control plane: leader election + external job store
 		\item Smarter scheduling: RTT, queue depth, cache locality
 		\item Stronger isolation: fuel metering, cgroups, admission control
 		\item Wider model: HTTP-handler ABI, WASI-HTTP, component model
 	\end{itemize}
 \end{frame}
 
-%------------------------------------------------ 19. Thank you
+% 19. Thank you
 \begin{frame}[plain]
 	\begin{center}
-		{\Huge Thank You}\\[1.2em]
-		{\LARGE Questions?}\\[1.2em]
-		{\small wasmCat --- Geo-Aware WebAssembly Serverless Orchestrator \\ Cao Trần Khánh Linh --- 23BI14252}
+		{\Huge Thank you for listening}\\[1.2em]
 	\end{center}
 \end{frame}
 

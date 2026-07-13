@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex 2026.7.5)  7 JUL 2026 21:28
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex 2026.7.5)  13 JUL 2026 07:55
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -772,15 +772,15 @@ Package: xkeyval 2022/06/16 v2.9 package option processing (HA)
 \XKV@depth=\count370
 File: xkeyval.tex 2014/12/03 v2.7a key=value parser (HA)
 ))) (C:\Users\PC\AppData\Local\Programs\MiKTeX\tex/latex/beamer\beamerinnerthemecircles.sty)
-LaTeX Font Info:    Trying to load font information for T5+opensans-TLF on input line 50.
-LaTeX Font Info:    No file T5opensans-TLF.fd. on input line 50.
-LaTeX Font Info:    Trying to load font information for T5+cmr on input line 50.
+LaTeX Font Info:    Trying to load font information for T5+opensans-TLF on input line 52.
+LaTeX Font Info:    No file T5opensans-TLF.fd. on input line 52.
+LaTeX Font Info:    Trying to load font information for T5+cmr on input line 52.
  (C:\Users\PC\AppData\Local\Programs\MiKTeX\tex/latex/vntex\t5cmr.fd
 File: t5cmr.fd 1999/05/25 v2.5h Standard LaTeX font definitions
 )
 
 LaTeX Font Warning: Font shape `T5/opensans-TLF/m/n' undefined
-(Font)              using `T5/cmr/m/n' instead on input line 50.
+(Font)              using `T5/cmr/m/n' instead on input line 52.
 
 (C:\Users\PC\AppData\Local\Programs\MiKTeX\tex/latex/l3backend\l3backend-pdftex.def
 File: l3backend-pdftex.def 2025-10-09 L3 backend support: PDF output (pdfTeX)
@@ -788,26 +788,26 @@ File: l3backend-pdftex.def 2025-10-09 L3 backend support: PDF output (pdfTeX)
 ) (slide.aux)
 \openout1 = `slide.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 50.
-LaTeX Font Info:    ... okay on input line 50.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 50.
-LaTeX Font Info:    ... okay on input line 50.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 50.
-LaTeX Font Info:    ... okay on input line 50.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 50.
-LaTeX Font Info:    ... okay on input line 50.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 50.
-LaTeX Font Info:    ... okay on input line 50.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 50.
-LaTeX Font Info:    ... okay on input line 50.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 50.
-LaTeX Font Info:    ... okay on input line 50.
-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 50.
-LaTeX Font Info:    ... okay on input line 50.
-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 50.
-LaTeX Font Info:    ... okay on input line 50.
-LaTeX Font Info:    Checking defaults for T5/cmr/m/n on input line 50.
-LaTeX Font Info:    ... okay on input line 50.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 52.
+LaTeX Font Info:    ... okay on input line 52.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 52.
+LaTeX Font Info:    ... okay on input line 52.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 52.
+LaTeX Font Info:    ... okay on input line 52.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 52.
+LaTeX Font Info:    ... okay on input line 52.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 52.
+LaTeX Font Info:    ... okay on input line 52.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 52.
+LaTeX Font Info:    ... okay on input line 52.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 52.
+LaTeX Font Info:    ... okay on input line 52.
+LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 52.
+LaTeX Font Info:    ... okay on input line 52.
+LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 52.
+LaTeX Font Info:    ... okay on input line 52.
+LaTeX Font Info:    Checking defaults for T5/cmr/m/n on input line 52.
+LaTeX Font Info:    ... okay on input line 52.
 
 *geometry* driver: auto-detecting
 *geometry* detected driver: pdftex
@@ -862,53 +862,53 @@ Package epstopdf-base Info: Redefining graphics rule for `.eps' on input line 48
  (C:\Users\PC\AppData\Local\Programs\MiKTeX\tex/latex/00miktex\epstopdf-sys.cfg
 File: epstopdf-sys.cfg 2021/03/18 v2.0 Configuration of epstopdf for MiKTeX
 ))
-Package hyperref Info: Link coloring OFF on input line 50.
+Package hyperref Info: Link coloring OFF on input line 52.
  (slide.out) (slide.out)
 \@outlinefile=\write5
 \openout5 = `slide.out'.
 
 LaTeX Font Info:    Overwriting symbol font `operators' in version `normal'
-(Font)                  OT1/cmr/m/n --> OT1/cmss/m/n on input line 50.
+(Font)                  OT1/cmr/m/n --> OT1/cmss/m/n on input line 52.
 LaTeX Font Info:    Overwriting symbol font `operators' in version `bold'
-(Font)                  OT1/cmr/bx/n --> OT1/cmss/b/n on input line 50.
+(Font)                  OT1/cmr/bx/n --> OT1/cmss/b/n on input line 52.
 \symnumbers=\mathgroup6
 \sympureletters=\mathgroup7
 LaTeX Font Info:    Overwriting math alphabet `\mathrm' in version `normal'
-(Font)                  OT1/cmss/m/n --> T5/ppl/m/n on input line 50.
-LaTeX Font Info:    Redeclaring math alphabet \mathbf on input line 50.
+(Font)                  OT1/cmss/m/n --> T5/ppl/m/n on input line 52.
+LaTeX Font Info:    Redeclaring math alphabet \mathbf on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathbf' in version `normal'
-(Font)                  OT1/cmr/bx/n --> T5/phv/b/n on input line 50.
+(Font)                  OT1/cmr/bx/n --> T5/phv/b/n on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathbf' in version `bold'
-(Font)                  OT1/cmr/bx/n --> T5/phv/b/n on input line 50.
-LaTeX Font Info:    Redeclaring math alphabet \mathsf on input line 50.
+(Font)                  OT1/cmr/bx/n --> T5/phv/b/n on input line 52.
+LaTeX Font Info:    Redeclaring math alphabet \mathsf on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathsf' in version `normal'
-(Font)                  OT1/cmss/m/n --> T5/phv/m/n on input line 50.
+(Font)                  OT1/cmss/m/n --> T5/phv/m/n on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathsf' in version `bold'
-(Font)                  OT1/cmss/bx/n --> T5/phv/m/n on input line 50.
-LaTeX Font Info:    Redeclaring math alphabet \mathit on input line 50.
+(Font)                  OT1/cmss/bx/n --> T5/phv/m/n on input line 52.
+LaTeX Font Info:    Redeclaring math alphabet \mathit on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathit' in version `normal'
-(Font)                  OT1/cmr/m/it --> T5/phv/m/it on input line 50.
+(Font)                  OT1/cmr/m/it --> T5/phv/m/it on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathit' in version `bold'
-(Font)                  OT1/cmr/bx/it --> T5/phv/m/it on input line 50.
-LaTeX Font Info:    Redeclaring math alphabet \mathtt on input line 50.
+(Font)                  OT1/cmr/bx/it --> T5/phv/m/it on input line 52.
+LaTeX Font Info:    Redeclaring math alphabet \mathtt on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathtt' in version `normal'
-(Font)                  OT1/cmtt/m/n --> T5/pcr/m/n on input line 50.
+(Font)                  OT1/cmtt/m/n --> T5/pcr/m/n on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathtt' in version `bold'
-(Font)                  OT1/cmtt/m/n --> T5/pcr/m/n on input line 50.
+(Font)                  OT1/cmtt/m/n --> T5/pcr/m/n on input line 52.
 LaTeX Font Info:    Overwriting symbol font `numbers' in version `bold'
-(Font)                  T5/phv/m/n --> T5/phv/b/n on input line 50.
+(Font)                  T5/phv/m/n --> T5/phv/b/n on input line 52.
 LaTeX Font Info:    Overwriting symbol font `pureletters' in version `bold'
-(Font)                  T5/phv/m/it --> T5/phv/b/it on input line 50.
+(Font)                  T5/phv/m/it --> T5/phv/b/it on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathrm' in version `bold'
-(Font)                  OT1/cmss/b/n --> T5/ppl/b/n on input line 50.
+(Font)                  OT1/cmss/b/n --> T5/ppl/b/n on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathbf' in version `bold'
-(Font)                  T5/phv/b/n --> T5/phv/b/n on input line 50.
+(Font)                  T5/phv/b/n --> T5/phv/b/n on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathsf' in version `bold'
-(Font)                  T5/phv/m/n --> T5/phv/b/n on input line 50.
+(Font)                  T5/phv/m/n --> T5/phv/b/n on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathit' in version `bold'
-(Font)                  T5/phv/m/it --> T5/phv/b/it on input line 50.
+(Font)                  T5/phv/m/it --> T5/phv/b/it on input line 52.
 LaTeX Font Info:    Overwriting math alphabet `\mathtt' in version `bold'
-(Font)                  T5/pcr/m/n --> T5/pcr/b/n on input line 50.
+(Font)                  T5/pcr/m/n --> T5/pcr/b/n on input line 52.
  (C:\Users\PC\AppData\Local\Programs\MiKTeX\tex/latex/translator\translator-basic-dictionary-English.dict
 Dictionary: translator-basic-dictionary, Language: English 
 ) (C:\Users\PC\AppData\Local\Programs\MiKTeX\tex/latex/translator\translator-bibliography-dictionary-English.dict
@@ -928,7 +928,7 @@ Dictionary: translator-theorem-dictionary, Language: English
  (slide.nav)
 
 LaTeX Font Warning: Font shape `T5/opensans-TLF/m/it' undefined
-(Font)              using `T5/opensans-TLF/m/n' instead on input line 57.
+(Font)              using `T5/opensans-TLF/m/n' instead on input line 59.
 
 [1
 
@@ -960,7 +960,7 @@ LaTeX Font Info:    Font shape `T5/phv/m/it' in size <6> not available
  [3
 
 ]
-LaTeX Font Info:    Trying to load font information for T5+pcr on input line 125.
+LaTeX Font Info:    Trying to load font information for T5+pcr on input line 123.
  (C:\Users\PC\AppData\Local\Programs\MiKTeX\tex/latex/vntex\t5pcr.fd
 File: t5ucr.fd 2005/08/24 Fontinst v1.929 font definitions for T5/pcr.
 ) [4
@@ -968,16 +968,12 @@ File: t5ucr.fd 2005/08/24 Fontinst v1.929 font definitions for T5/pcr.
 {C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/vntex/t5.enc}] [5
 
 ]
-<images/architecture_diagram.png, id=127, 1043.9pt x 583.17876pt>
+<images/architecture_diagram.png, id=98, 1043.9pt x 583.17876pt>
 File: images/architecture_diagram.png Graphic file (type png)
 <use images/architecture_diagram.png>
-Package pdftex.def Info: images/architecture_diagram.png  used on input line 151.
+Package pdftex.def Info: images/architecture_diagram.png  used on input line 149.
 (pdftex.def)             Requested size: 314.0485pt x 175.45062pt.
-
-Overfull \vbox (11.52531pt too high) detected at line 151
- []
-
-[6
+ [6
 
  <./images/architecture_diagram.png>]
 \openout4 = `slide.vrb'.
@@ -991,7 +987,7 @@ LaTeX Font Info:    Font shape `T5/phv/m/it' in size <5> not available
 (Font)              Font shape `T5/phv/m/sl' tried instead on input line 32.
 )
 LaTeX Font Info:    Font shape `T5/phv/m/it' in size <14.4> not available
-(Font)              Font shape `T5/phv/m/sl' tried instead on input line 188.
+(Font)              Font shape `T5/phv/m/sl' tried instead on input line 186.
  [7
 
 ]
@@ -1000,7 +996,7 @@ LaTeX Font Info:    Font shape `T5/phv/m/it' in size <14.4> not available
  (slide.vrb) [8
 
 ]
-LaTeX Font Info:    Trying to load font information for T5+ppl on input line 255.
+LaTeX Font Info:    Trying to load font information for T5+ppl on input line 249.
  (C:\Users\PC\AppData\Local\Programs\MiKTeX\tex/latex/vntex\t5ppl.fd
 File: t5upl.fd 2005/08/24 Fontinst v1.929 font definitions for T5/ppl.
 ) [9
@@ -1018,13 +1014,13 @@ File: t5upl.fd 2005/08/24 Fontinst v1.929 font definitions for T5/ppl.
  (slide.vrb) [12
 
 ]
-<images/state_machine_diagram.png, id=244, 482.80376pt x 422.57875pt>
+<images/state_machine_diagram.png, id=187, 482.80376pt x 422.57875pt>
 File: images/state_machine_diagram.png Graphic file (type png)
 <use images/state_machine_diagram.png>
-Package pdftex.def Info: images/state_machine_diagram.png  used on input line 361.
+Package pdftex.def Info: images/state_machine_diagram.png  used on input line 355.
 (pdftex.def)             Requested size: 208.00327pt x 182.05351pt.
 
-Overfull \vbox (9.72821pt too high) detected at line 361
+Overfull \vbox (9.72821pt too high) detected at line 355
  []
 
 [13
@@ -1061,20 +1057,20 @@ L3 programming layer <2025-12-24>
 LaTeX Font Warning: Some font shapes were not available, defaults substituted.
 
 Package rerunfilecheck Info: File `slide.out' has not changed.
-(rerunfilecheck)             Checksum: 464F8E3A4A6FFAA795D48591A0E37C75;639.
+(rerunfilecheck)             Checksum: B27D1BA79C93BC184D490D818463784A;561.
  ) 
 Here is how much of TeX's memory you used:
- 25100 strings out of 467870
- 477895 string characters out of 5419808
- 852376 words of memory out of 5000000
- 53391 multiletter control sequences out of 15000+600000
- 701019 words of font info for 113 fonts, out of 8000000 for 9000
+ 25053 strings out of 467870
+ 476598 string characters out of 5419808
+ 851059 words of memory out of 5000000
+ 53344 multiletter control sequences out of 15000+600000
+ 700045 words of font info for 112 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  128i,15n,123p,397b,1560s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmmi10.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmss10.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmss8.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy10.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/urwvn/ucrb8v.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/urwvn/ucrr8v.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/urwvn/uhvr8v.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/urwvn/uhvro8v.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/urwvn/uplr8v.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/vnr/vnr10.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/vnr/vnr12.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/vnr/vnr17.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/vnr/vnr6.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/vnr/vnr8.pfb>
-Output written on slide.pdf (19 pages, 276046 bytes).
+Output written on slide.pdf (19 pages, 258397 bytes).
 PDF statistics:
- 386 PDF objects out of 1000 (max. 8388607)
+ 332 PDF objects out of 1000 (max. 8388607)
  44 named destinations out of 1000 (max. 500000)
- 453 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 285 words of extra memory for PDF output out of 10000 (max. 10000000)
 

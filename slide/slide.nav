@@ -13,7 +13,7 @@
 \headcommand {\beamer@framepages {5}{5}}
 \headcommand {\beamer@sectionpages {3}{5}}
 \headcommand {\beamer@subsectionpages {3}{5}}
-\headcommand {\sectionentry {2}{Method --- System Design}{6}{Method --- System Design}{0}}
+\headcommand {\sectionentry {2}{Architectural Design}{6}{Architectural Design}{0}}
 \headcommand {\slideentry {2}{0}{1}{6/6}{}{0}}
 \headcommand {\beamer@framepages {6}{6}}
 \headcommand {\slideentry {2}{0}{2}{7/7}{}{0}}
@@ -28,7 +28,7 @@
 \headcommand {\beamer@framepages {11}{11}}
 \headcommand {\beamer@sectionpages {6}{11}}
 \headcommand {\beamer@subsectionpages {6}{11}}
-\headcommand {\sectionentry {3}{Process --- Execution Lifecycle}{12}{Process --- Execution Lifecycle}{0}}
+\headcommand {\sectionentry {3}{Execution Lifecycle}{12}{Execution Lifecycle}{0}}
 \headcommand {\slideentry {3}{0}{1}{12/12}{}{0}}
 \headcommand {\beamer@framepages {12}{12}}
 \headcommand {\slideentry {3}{0}{2}{13/13}{}{0}}
