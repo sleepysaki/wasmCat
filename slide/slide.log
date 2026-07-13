@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex 2026.7.5)  13 JUL 2026 07:55
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex 2026.7.5)  13 JUL 2026 09:40
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -1014,13 +1014,13 @@ File: t5upl.fd 2005/08/24 Fontinst v1.929 font definitions for T5/ppl.
  (slide.vrb) [12
 
 ]
-<images/state_machine_diagram.png, id=187, 482.80376pt x 422.57875pt>
+<images/state_machine_diagram.png, id=173, 482.80376pt x 422.57875pt>
 File: images/state_machine_diagram.png Graphic file (type png)
 <use images/state_machine_diagram.png>
-Package pdftex.def Info: images/state_machine_diagram.png  used on input line 355.
+Package pdftex.def Info: images/state_machine_diagram.png  used on input line 356.
 (pdftex.def)             Requested size: 208.00327pt x 182.05351pt.
 
-Overfull \vbox (9.72821pt too high) detected at line 355
+Overfull \vbox (9.72821pt too high) detected at line 356
  []
 
 [13
@@ -1060,17 +1060,17 @@ Package rerunfilecheck Info: File `slide.out' has not changed.
 (rerunfilecheck)             Checksum: B27D1BA79C93BC184D490D818463784A;561.
  ) 
 Here is how much of TeX's memory you used:
- 25053 strings out of 467870
- 476598 string characters out of 5419808
- 851059 words of memory out of 5000000
- 53344 multiletter control sequences out of 15000+600000
+ 25045 strings out of 467870
+ 476309 string characters out of 5419808
+ 851060 words of memory out of 5000000
+ 53336 multiletter control sequences out of 15000+600000
  700045 words of font info for 112 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  128i,15n,123p,397b,1560s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmmi10.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmss10.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmss8.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy10.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/urwvn/ucrb8v.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/urwvn/ucrr8v.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/urwvn/uhvr8v.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/urwvn/uhvro8v.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/urwvn/uplr8v.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/vnr/vnr10.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/vnr/vnr12.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/vnr/vnr17.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/vnr/vnr6.pfb><C:/Users/PC/AppData/Local/Programs/MiKTeX/fonts/type1/vntex/vnr/vnr8.pfb>
-Output written on slide.pdf (19 pages, 258397 bytes).
+Output written on slide.pdf (19 pages, 253876 bytes).
 PDF statistics:
- 332 PDF objects out of 1000 (max. 8388607)
+ 320 PDF objects out of 1000 (max. 8388607)
  44 named destinations out of 1000 (max. 500000)
- 285 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 249 words of extra memory for PDF output out of 10000 (max. 10000000)
 

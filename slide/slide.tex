@@ -111,10 +111,10 @@
 		\begin{column}{0.5\textwidth}
 			\textbf{WebAssembly + wazero}
 			\begin{itemize}
-				\item One \texttt{.wasm}, any host
+				\item One \texttt{.wasm} file
 				\item Sandbox: linear memory only
 				\item Compile once, instantiate per request 
-				\item Pure-Go runtime, \emph{embedded}
+				\item Run on any worker with Go runtime
 			\end{itemize}
 		\end{column}
 	\end{columns}
@@ -127,11 +127,11 @@
 	\frametitle{Contributions}
 	\begin{enumerate}
 		\item Go-native master-worker orchestrator
-		\item Capacity-aware \textbf{geo-routing} with Haversine formula 
-		\item Embedded \textbf{wazero}: 2 ABIs, digest-aware cache, strict limits
+		\item Capacity-aware \textbf{geo-routing} scheduling with Haversine formula 
+		\item Embedded \textbf{wazero}: digest-aware cache, strict limits
 		\item \textbf{Security}: mTLS, certificate-bound identity, digest verification
 		\item \textbf{Reliability}: durable SQLite jobs, idempotency
-		\item \textbf{Tooling}: CLI, web dashboard, JIT provisioning from Azure ACR
+		\item \textbf{Tooling}: CLI, web dashboard
 	\end{enumerate}
 \end{frame}
 
@@ -248,35 +248,36 @@ struct {
 
 \end{frame}
 
-% 10. ABIs — byte-level I/O  (KEY)
+% 10. Execution Modes
 \begin{frame}[fragile]
 	\frametitle{Execution Modes}
+	Two ways to pass data in and read the result out:
+	\medskip
 	\begin{columns}[t]
 		\begin{column}{0.52\textwidth}
-			\textbf{wasmCat ABI} (custom)
+			\textbf{wasmCat ABI}: 
 \begin{lstlisting}
-// module exports: memory, malloc, run
-run(ptr uint32, len uint32) uint64
-// in : payload bytes at [ptr, ptr+len)
-// out: packed uint64
-outPtr = uint32(packed >> 32)
-outLen = uint32(packed & 0xFFFFFFFF)
+// module exports: run
+run(ptr, len) -> packed uint64
+// host writes input to memory,
+// calls run, reads output back
 \end{lstlisting}
+			{\small Minimal \& fast, but module must be built for it.}
 		\end{column}
 		\begin{column}{0.46\textwidth}
-			\textbf{WASI} (\texttt{wasip1})
+			\textbf{WASI}: 
 \begin{lstlisting}
 // module exports: _start
 stdin  <- payload
-_start()          // exit 0 = ok
 stdout -> result
 \end{lstlisting}
+			{\small Any Rust / Go / C build runs unchanged.}
 		\end{column}
 	\end{columns}
-	\smallskip
-	\begin{block}{Auto-detect (\texttt{abi} = "" | wasmcat | wasi)}
-		exports \texttt{run} $\Rightarrow$ custom \quad\textbar\quad exports \texttt{\_start} $\Rightarrow$ WASI. \; Both: same digest cache, fresh instance per request.
-	\end{block}
+	\medskip
+
+	\textbf{Worker auto-picks} from the module's exports: \texttt{run} $\to$ wasmCat ABI, \texttt{\_start} $\to$ WASI.\\
+	Both: compiled once (digest cache), fresh instance per request.
 \end{frame}
 
 % 11. Security method
@@ -285,7 +286,7 @@ stdout -> result
 	\begin{enumerate}
 		\item \textbf{mTLS}: Verified client cert before any handler
 		\item \textbf{Certificate-bound identity}: Claimed worker ID must equal cert CN / DNS SAN $\Rightarrow$ no impersonation
-		\item \textbf{Module integrity}: Verified SHA-256 hash before compile; digest is part of cache key
+		\item \textbf{Module integrity}: Verified SHA-256 hash before compile
 		\item \textbf{Scoped credentials}: ACR token: repository-scoped, pull-only, short-lived
 	\end{enumerate}
 	% \bigskip
@@ -342,7 +343,7 @@ stdout -> result
 				\item \textbf{Idempotency}: same fingerprint $\rightarrow$ replay; different $\rightarrow$ \texttt{409}
 			\end{itemize}
 			\begin{alertblock}{\texttt{ambiguous}}
-				Lease expired, execution unconfirmed $\Rightarrow$ mark \texttt{ambiguous}, never blind-retry. \emph{Correctness over convenience.}
+				Lease expired, execution unconfirmed $\Rightarrow$ mark \texttt{ambiguous}, never retry blindly. 
 			\end{alertblock}
 		\end{column}
 		\begin{column}{0.48\textwidth}
